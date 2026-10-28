@@ -15,7 +15,7 @@ const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
 
 /**
  * Warp-style command editor: a transparent textarea over a highlighted mirror, with
- * history ghost text (→ accepts), Tab completion popup, ↑/↓ prefix history and ⌃R search.
+ * history ghost text (→/⇥ accepts), Tab completion popup, ↑/↓ prefix history and ⌃R search.
  */
 export class CommandInput {
   readonly el: HTMLElement;
@@ -120,6 +120,7 @@ export class CommandInput {
       case "Tab":
         e.preventDefault();
         if (popupOpen) e.shiftKey ? this.move(-1) : this.accept();
+        else if (!e.shiftKey && this.ghost()) this.setText(this.text + this.ghost());
         else this.openCompletion(true);
         return;
       case "Escape":

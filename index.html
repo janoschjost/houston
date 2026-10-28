@@ -4,64 +4,72 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Houston</title>
-    <!-- Inline so the boot screen is styled before the bundled stylesheet loads. -->
+    <!-- Inline so the boot screen is styled before the bundled stylesheet loads; colours mirror style.css. -->
     <style>
-      html, body { margin: 0; background: #0b0e14; }
+      html, body { margin: 0; background: #0b1220; }
       #boot {
         position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
-        background: radial-gradient(ellipse at 50% 42%, #141b29, #0b0e14 70%);
-        color: #6f7a8e; font: 11px/1.4 "JetBrains Mono", Menlo, monospace;
-        transition: opacity .35s ease;
+        background:
+          linear-gradient(#8cc8f00d 1px, transparent 1px) 0 0 / 24px 24px,
+          linear-gradient(90deg, #8cc8f00d 1px, transparent 1px) 0 0 / 24px 24px,
+          radial-gradient(ellipse at 50% 42%, #13213a, #0b1220 70%);
+        color: #8394ad; font: 500 10.5px/1.4 "IBM Plex Mono", Menlo, monospace;
+        transition: opacity .4s cubic-bezier(.3, .7, .2, 1);
       }
       #boot.done { opacity: 0; pointer-events: none; }
-      .boot-card { display: grid; justify-items: center; gap: 14px; }
-      .boot-planet { overflow: visible; }
-      .boot-orbit { transform-origin: 60px 60px; animation: boot-spin 3.2s linear infinite; }
-      .boot-title { color: #f0f2f5; font-size: 22px; font-weight: 700; letter-spacing: .5em; margin-right: -.5em; }
-      .boot-status { letter-spacing: .2em; text-transform: uppercase; font-size: 10px; }
-      .boot-status.failed { color: #d77a7a; text-transform: none; letter-spacing: 0; max-width: 60ch; text-align: center; }
-      .boot-dots i { font-style: normal; animation: boot-dot 1.2s infinite; }
-      .boot-dots i:nth-child(2) { animation-delay: .2s; }
-      .boot-dots i:nth-child(3) { animation-delay: .4s; }
+      .boot-card { display: grid; justify-items: center; gap: 18px; text-align: center; }
+      .boot-mark { width: 148px; height: 148px; overflow: visible; fill: none; stroke: #8cc8f0; stroke-linecap: round; }
+      .boot-mark * { vector-effect: non-scaling-stroke; stroke-width: 1.6px; }
+      .boot-mark .draw { stroke-dasharray: 1; animation: boot-draw 1.2s cubic-bezier(.45, 0, .55, 1) both; }
+      .boot-mark .faint { stroke-opacity: .38; animation: boot-fade .6s ease 1s both; }
+      .boot-mark .tick { stroke-opacity: .55; }
+      .boot-mark .body { fill: #0f1b30; }
+      .boot-sat { transform-origin: 50px 50px; animation: boot-spin 2.4s cubic-bezier(.45, 0, .55, 1) both, boot-spin 9.6s linear 2.4s infinite; }
+      .boot-sat circle { fill: #eba582; stroke: #0f1b30; stroke-width: 4px; }
+      .boot-title { color: #e1e9f5; font: 600 30px/1 "IBM Plex Sans Condensed", "Arial Narrow", sans-serif; letter-spacing: .32em; margin-right: -.32em; animation: boot-track 1.2s cubic-bezier(.45, 0, .55, 1) .3s both; }
+      .boot-sub { margin-top: 10px; letter-spacing: .3em; margin-right: -.3em; text-transform: uppercase; font-size: 10px; }
+      .boot-status { display: inline-flex; align-items: center; gap: 10px; letter-spacing: .2em; text-transform: uppercase; }
+      .boot-status.failed { color: #f08a83; text-transform: none; letter-spacing: 0; max-width: 60ch; }
+      .boot-status svg { width: 14px; height: 14px; fill: none; stroke: #a9b8ff; stroke-width: 1.3; stroke-dasharray: 1; animation: boot-loop 2.4s cubic-bezier(.45, 0, .55, 1) infinite; }
+      .boot-status.failed svg { display: none; }
+      @keyframes boot-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+      @keyframes boot-loop { from { stroke-dashoffset: 1; } 60%, to { stroke-dashoffset: 0; } }
+      @keyframes boot-fade { from { opacity: 0; } }
       @keyframes boot-spin { to { transform: rotate(360deg); } }
-      @keyframes boot-dot { 0%, 100% { opacity: .2; } 40% { opacity: 1; } }
-      @media (prefers-reduced-motion: reduce) { .boot-orbit, .boot-dots i { animation: none; } }
+      @keyframes boot-track { from { letter-spacing: .8em; opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { #boot * { animation: none !important; } }
     </style>
   </head>
   <body>
     <div id="app">
       <aside id="sidebar">
         <div class="brand" data-tauri-drag-region>
-          <svg class="brand-mark" viewBox="0 0 20 20" aria-hidden="true" data-tauri-drag-region>
-            <g transform="rotate(-14 10 10)">
-              <circle cx="10" cy="10" r="4.6"/>
-              <path d="M 5.6 8.7 A 7.6 2.2 0 1 0 14.4 8.7"/>
-            </g>
-            <circle class="brand-moon" cx="16.2" cy="4.2" r="1.3"/>
-          </svg>
-          <span class="brand-name" data-tauri-drag-region>HOUSTON</span>
-          <span class="brand-sub" data-tauri-drag-region>mission control</span>
-          <span class="brand-link" title="Online"></span>
+          <span id="brand-mark"></span>
+          <div class="brand-type">
+            <span class="brand-name">HOUSTON</span>
+            <span class="brand-sub">mission control</span>
+          </div>
         </div>
         <div id="projects"></div>
         <div class="sidebar-foot">
-          <button id="add-project">+ Add project <kbd>⌘O</kbd></button>
-          <button id="open-aliases">⌁ Aliases <kbd>⌘⇧P</kbd></button>
+          <button id="add-project" data-icon="project">Add project <kbd>⌘O</kbd></button>
+          <button id="open-aliases" data-icon="alias">Aliases <kbd>⌘⇧P</kbd></button>
           <div id="telemetry"></div>
           <div id="limits"></div>
         </div>
+        <div id="sidebar-gutter" class="gutter col" title="Drag to resize · double-click to reset"></div>
       </aside>
       <main>
         <header id="topbar" data-tauri-drag-region>
           <div id="crumbs" data-tauri-drag-region></div>
           <div class="actions">
             <button id="waiting-pill" class="hidden" title="Jump to next waiting session (⌘J)"></button>
-            <button id="new-claude" class="btn-claude">✽ Claude <kbd>⌘N</kbd></button>
-            <button id="new-shell">›_ Shell <kbd>⌘T</kbd></button>
+            <button id="new-claude" class="btn-claude" data-icon="agent">Claude <kbd>⌘N</kbd></button>
+            <button id="new-shell" data-icon="shell">Shell <kbd>⌘T</kbd></button>
             <div class="seg">
-              <button data-layout="focus">Focus</button>
-              <button data-layout="grid">Grid</button>
-              <button data-layout="split" title="Split view (⌘\)">Split</button>
+              <button data-layout="focus" data-icon="focus">Focus</button>
+              <button data-layout="grid" data-icon="grid">Grid</button>
+              <button data-layout="split" data-icon="split" title="Split view (⌘\)">Split</button>
             </div>
           </div>
         </header>
@@ -78,8 +86,8 @@
               <path d="M60 220 H380 M220 60 V380" class="faint"/>
               <g class="bp-sweep"><path d="M220 220 V80 A140 140 0 0 1 319 121 Z" class="wedge"/><path d="M220 220 L319 121"/></g>
               <circle cx="290" cy="160" r="3" class="fill bp-blip"/>
-              <circle cx="160" cy="300" r="2.5" class="fill bp-blip" style="animation-delay: -3s"/>
-              <circle cx="250" cy="320" r="2" class="fill bp-blip" style="animation-delay: -6s"/>
+              <circle cx="160" cy="300" r="2.5" class="fill bp-blip" style="animation-delay: -4.8s"/>
+              <circle cx="250" cy="320" r="2" class="fill bp-blip" style="animation-delay: -9.6s"/>
               <text x="220" y="58" text-anchor="middle">000</text>
               <text x="384" y="224">090</text>
               <text x="220" y="394" text-anchor="middle">180</text>
@@ -98,8 +106,8 @@
               <path d="M400 280 A165 152 0 0 0 70 280" class="bp-trace" pathLength="100"/>
               <circle cx="400" cy="280" r="3" class="fill"/>
               <circle cx="70" cy="280" r="3" class="fill"/>
-              <g><animateMotion dur="20s" repeatCount="indefinite" rotate="auto" path="M400 280 A100 100 0 1 0 200 280 A100 100 0 1 0 400 280"/><path d="M0 -7 V7"/><rect x="-2.5" y="-2.5" width="5" height="5" class="fill"/></g>
-              <g><animateMotion dur="70s" repeatCount="indefinite" path="M530 280 A230 230 0 1 0 70 280 A230 230 0 1 0 530 280"/><circle r="3.5" class="fill"/></g>
+              <g><animateMotion dur="19.2s" repeatCount="indefinite" rotate="auto" path="M400 280 A100 100 0 1 0 200 280 A100 100 0 1 0 400 280"/><path d="M0 -7 V7"/><rect x="-2.5" y="-2.5" width="5" height="5" class="fill"/></g>
+              <g><animateMotion dur="67.2s" repeatCount="indefinite" path="M530 280 A230 230 0 1 0 70 280 A230 230 0 1 0 530 280"/><circle r="3.5" class="fill"/></g>
               <text x="410" y="306">ΔV1 +2.46 KM/S</text>
               <text x="80" y="306">ΔV2 +1.47 KM/S</text>
               <text x="380" y="200">LEO 405 KM</text>
@@ -138,33 +146,22 @@
             </svg>
           </div>
           <section id="stage" class="stage"></section>
+          <nav id="dock" class="dock hidden" aria-label="Collapsed sessions"></nav>
         </div>
       </main>
     </div>
     <div id="boot">
       <div class="boot-card">
-        <svg class="boot-planet" width="120" height="120" viewBox="0 0 120 120" aria-hidden="true">
-          <defs>
-            <radialGradient id="bt-body" cx="34%" cy="28%" r="80%"><stop offset="0" stop-color="#b8ecff"/><stop offset=".35" stop-color="#5bb4e6"/><stop offset=".7" stop-color="#4868c4"/><stop offset="1" stop-color="#33296e"/></radialGradient>
-            <radialGradient id="bt-glow" r="50%"><stop offset="0" stop-color="#4fb3ff" stop-opacity=".35"/><stop offset="1" stop-color="#4fb3ff" stop-opacity="0"/></radialGradient>
-            <linearGradient id="bt-ring" x1="22" x2="98" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#b79cf5"/><stop offset=".5" stop-color="#f29bb8"/><stop offset="1" stop-color="#f5c983"/></linearGradient>
-            <clipPath id="bt-globe"><circle cx="60" cy="60" r="24"/></clipPath>
-          </defs>
-          <circle cx="60" cy="60" r="58" fill="url(#bt-glow)"/>
-          <circle cx="60" cy="60" r="54" fill="none" stroke="#7fd0ff" stroke-opacity=".25" stroke-width="3" stroke-dasharray=".6 8.82"/>
-          <circle cx="60" cy="60" r="46" fill="none" stroke="#7fd0ff" stroke-opacity=".2" stroke-dasharray="2 5"/>
-          <g transform="rotate(-14 60 60)">
-            <path d="M 22 60 a 38 10 0 0 1 76 0" fill="none" stroke="url(#bt-ring)" stroke-width="2.5" stroke-opacity=".45" stroke-linecap="round"/>
-            <circle cx="60" cy="60" r="24" fill="url(#bt-body)"/>
-            <g clip-path="url(#bt-globe)" fill="none" stroke="#e0f6ff" stroke-opacity=".22">
-              <ellipse cx="60" cy="60" rx="13" ry="24"/><ellipse cx="60" cy="60" rx="24" ry="5"/>
-            </g>
-            <path d="M 98 60 a 38 10 0 0 1 -76 0" fill="none" stroke="url(#bt-ring)" stroke-width="2.5" stroke-linecap="round"/>
-          </g>
-          <g class="boot-orbit"><circle cx="60" cy="14" r="4.5" fill="#ee8f7c"/></g>
+        <!-- The mark from src/icons.ts, drawn at boot size with ticks and meridians. -->
+        <svg class="boot-mark" viewBox="0 0 100 100" aria-hidden="true">
+          <circle cx="50" cy="50" r="40" class="draw" pathLength="1" transform="rotate(-90 50 50)"/>
+          <path d="M50 4v10M50 86v10M4 50h10M86 50h10" class="draw tick" pathLength="1"/>
+          <circle cx="50" cy="50" r="16" class="draw body" pathLength="1"/>
+          <g transform="rotate(-14 50 50)" class="faint"><ellipse cx="50" cy="50" rx="16" ry="4.5"/><ellipse cx="50" cy="50" rx="6.5" ry="16"/></g>
+          <g class="boot-sat"><circle cx="50" cy="10" r="5"/></g>
         </svg>
-        <div class="boot-title">HOUSTON</div>
-        <div class="boot-status">Establishing uplink<span class="boot-dots"><i>.</i><i>.</i><i>.</i></span></div>
+        <div><div class="boot-title">HOUSTON</div><div class="boot-sub">mission control</div></div>
+        <div class="boot-status"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" pathLength="1" transform="rotate(-90 8 8)"/></svg><span class="boot-text">Establishing uplink</span></div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

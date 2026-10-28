@@ -5,8 +5,9 @@ import { AliasPalette } from "./aliases";
 import { api, type GitStatus, type LimitWindow, type RateLimits, type ShellInfo } from "./api";
 import { Completer } from "./completion";
 import { DiffPanel } from "./diff";
+import { fillIcons, icon, light, mark } from "./icons";
 import { BriefDialog, CommandPalette, ContextMenu, type Command, type MenuItem } from "./palette";
-import { STATUS_LABEL, Session, nextProjectColor, shellQuote, shortPath, statsLabel, type Kind, type ProjectRec, type SessionRec } from "./session";
+import { STATUS_LABEL, Session, currentProjectColor, nextProjectColor, shellQuote, shortPath, type Kind, type ProjectRec, type SessionRec } from "./session";
 
 /** Split shows two sessions side by side. */
 type Layout = "focus" | "grid" | "split";
@@ -33,21 +34,18 @@ interface Persisted {
   selectedId?: string;
   layout: Layout;
   sidebarHidden?: boolean;
+  /** Dragged sidebar width in pixels; unset uses the stylesheet default. */
+  sidebarWidth?: number;
   /** The two sessions of the split layout. */
   split?: string[];
+  /** Project the grid is limited to; unset shows every session. */
+  gridProject?: string;
   /** Resized track sizes per layout shape, e.g. "grid:3x2". */
   tracks?: Record<string, Tracks>;
 }
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const LOGO = String.raw`██╗  ██╗ ██████╗ ██╗   ██╗███████╗████████╗ ██████╗ ███╗   ██╗
-██║  ██║██╔═══██╗██║   ██║██╔════╝╚══██╔══╝██╔═══██╗████╗  ██║
-███████║██║   ██║██║   ██║███████╗   ██║   ██║   ██║██╔██╗ ██║
-██╔══██║██║   ██║██║   ██║╚════██║   ██║   ██║   ██║██║╚██╗██║
-██║  ██║╚██████╔╝╚██████╔╝███████║   ██║   ╚██████╔╝██║ ╚████║
-╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═══╝`;
-
 function countdown(ms: number) {
   const m = Math.ceil(ms / 60_000);
   if (m < 60) return `${m}m`;
@@ -56,7 +54,7 @@ function countdown(ms: number) {
   return `${Math.floor(h / 24)}d${h % 24}h`;
 }
 
-/** Approximate xterm cell size at 13px JetBrains Mono, used to size grid panes. */
+/** Approximate xterm cell size at 13px IBM Plex Mono, used to size grid panes. */
 const CELL_W = 7.8;
 const CELL_H = 15;
 
@@ -78,6 +76,10 @@ const EDITORS = ["cursor", "code", "zed", "subl"];
 /** Smallest width or height a resized grid track can be dragged to, in pixels. */
 const MIN_TRACK = 160;
 
+/** Range the sidebar can be dragged across, in pixels. */
+const SIDEBAR_MIN = 200;
+const SIDEBAR_MAX = 600;
+
 /** Uncommitted-change counts for a project badge, e.g. "+2 ~5 ?1"; empty when clean. */
 function gitBadge(g?: GitStatus | null) {
   if (!g) return "";
@@ -93,78 +95,31 @@ function briefName(prompt: string) {
   return line.length > 48 ? line.slice(0, 47) + "…" : line;
 }
 
-const FUEL_CELLS = 20;
-
 /** Remaining share of a usage window; a window whose reset time has passed is full again. */
 function fuelLeft(w: LimitWindow) {
   return w.resets_at * 1000 > Date.now() ? Math.max(0, Math.round(100 - w.used_percentage)) : 100;
 }
 
-const fuelTone = (left: number) => (left <= 10 ? "l-red" : left <= 30 ? "l-amber" : "l-green");
+const fuelTone = (left: number) => (left <= 10 ? "l-red" : left <= 30 ? "l-amber" : "");
 
+/** One window as a labelled gauge: name and reset countdown above, % left on the right, a thin bar below. */
 function renderTank(label: string, w: LimitWindow) {
   const left = fuelLeft(w);
   const msLeft = w.resets_at * 1000 - Date.now();
-  const lit = Math.round((left / 100) * FUEL_CELLS);
-  const cells = Array.from({ length: FUEL_CELLS }, (_, i) => `<i${i < lit ? ` class="on"` : ""}></i>`).join("");
   return `<div class="tank ${fuelTone(left)}" title="${100 - left}% used">
-    <span class="l-label">${label}</span>
-    <span class="l-cells">${cells}</span>
-    <span class="l-left">${left}%</span>
-    <span class="l-reset">${msLeft > 0 ? `T−${countdown(msLeft)}` : "FULL"}</span>
+    <div class="l-row"><span>${label}<span class="l-reset">${msLeft > 0 ? `T−${countdown(msLeft)}` : "full"}</span></span><span class="l-left">${left}% left</span></div>
+    <div class="l-bar"><i style="width: ${left}%"></i></div>
   </div>`;
 }
 
 function renderLimits(limits: RateLimits | null) {
   const windows = [
-    ["5H", limits?.five_hour],
-    ["WK", limits?.seven_day],
+    ["5h limit", limits?.five_hour],
+    ["Week", limits?.seven_day],
   ].filter((e): e is [string, LimitWindow] => !!e[1]);
-  if (!windows.length) {
-    return `<div class="l-head"><span>◆ Claude limits</span><span>no telemetry</span></div>
-      <div class="l-empty">reported once a Claude session responds</div>`;
-  }
-  const low = Math.min(...windows.map(([, w]) => fuelLeft(w)));
-  const status = low <= 10 ? `<span class="l-warn l-red">⚠ Low fuel</span>` : low <= 30 ? `<span class="l-amber">Fuel low</span>` : `<span>Nominal</span>`;
-  return `<div class="l-head"><span>◆ Claude limits</span>${status}</div>
-    ${windows.map(([label, w]) => renderTank(label, w)).join("")}
-    <div class="l-scale"><span>E</span><span>½</span><span>F</span></div>`;
+  if (!windows.length) return `<div class="l-empty">Claude limits show once a Claude session responds</div>`;
+  return windows.map(([label, w]) => renderTank(label, w)).join("");
 }
-
-/** Ringed planet with an orbiting moon and rocket, as in the README banner. */
-const PLANET = `<svg class="planet" viewBox="0 0 360 200" aria-hidden="true">
-  <defs>
-    <radialGradient id="pl-body" cx="34%" cy="28%" r="80%"><stop offset="0" stop-color="#b8ecff"/><stop offset=".35" stop-color="#5bb4e6"/><stop offset=".7" stop-color="#4868c4"/><stop offset="1" stop-color="#33296e"/></radialGradient>
-    <radialGradient id="pl-moon" cx="34%" cy="30%" r="75%"><stop offset="0" stop-color="#ffd8c2"/><stop offset=".6" stop-color="#e5917a"/><stop offset="1" stop-color="#94504a"/></radialGradient>
-    <radialGradient id="pl-glow" r="50%"><stop offset="0" stop-color="#4fb3ff" stop-opacity=".3"/><stop offset="1" stop-color="#4fb3ff" stop-opacity="0"/></radialGradient>
-    <linearGradient id="pl-ring" x1="110" x2="250" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#b79cf5"/><stop offset=".5" stop-color="#f29bb8"/><stop offset="1" stop-color="#f5c983"/></linearGradient>
-    <linearGradient id="pl-flame" x1="0" x2="1"><stop offset="0" stop-color="#f5c983" stop-opacity="0"/><stop offset=".6" stop-color="#f5c983"/><stop offset="1" stop-color="#fff1c9"/></linearGradient>
-    <clipPath id="pl-globe"><circle cx="180" cy="100" r="42"/></clipPath>
-    <path id="pl-orbit" d="M 180 100 m -130 0 a 130 46 -12 1 0 260 0 a 130 46 -12 1 0 -260 0"/>
-  </defs>
-  <circle cx="180" cy="100" r="96" fill="url(#pl-glow)"/>
-  <circle cx="180" cy="100" r="62" fill="none" stroke="#7fd0ff" stroke-opacity=".2" stroke-width="4" stroke-dasharray=".8 9.94"/>
-  <use href="#pl-orbit" fill="none" stroke="#7fd0ff" stroke-opacity=".22" stroke-dasharray="2 6"/>
-  <ellipse cx="180" cy="100" rx="172" ry="64" transform="rotate(-12 180 100)" fill="none" stroke="#7fd0ff" stroke-opacity=".12" stroke-dasharray="1 8"/>
-  <g transform="rotate(-12 180 100)">
-    <path d="M 110 100 a 70 15 0 0 1 140 0" fill="none" stroke="url(#pl-ring)" stroke-width="3" stroke-opacity=".45" stroke-linecap="round"/>
-    <circle cx="180" cy="100" r="42" fill="url(#pl-body)"/>
-    <g clip-path="url(#pl-globe)" fill="none" stroke="#e0f6ff" stroke-opacity=".22">
-      <ellipse cx="180" cy="100" rx="23" ry="42"/><ellipse cx="180" cy="100" rx="42" ry="9"/>
-    </g>
-    <path d="M 250 100 a 70 15 0 0 1 -140 0" fill="none" stroke="url(#pl-ring)" stroke-width="3" stroke-linecap="round"/>
-  </g>
-  <circle r="8" fill="url(#pl-moon)"><animateMotion dur="26s" repeatCount="indefinite" path="M 180 100 m -172 0 a 172 64 -12 1 0 344 0 a 172 64 -12 1 0 -344 0"/></circle>
-  <g>
-    <animateMotion dur="12s" repeatCount="indefinite" rotate="auto"><mpath href="#pl-orbit"/></animateMotion>
-    <g transform="translate(-11 0) scale(.8)">
-      <path d="M -20 0 L 0 -4 L 0 4 Z" fill="url(#pl-flame)"><animate attributeName="d" values="M -20 0 L 0 -4 L 0 4 Z;M -28 0 L 0 -4 L 0 4 Z;M -20 0 L 0 -4 L 0 4 Z" dur=".25s" repeatCount="indefinite"/></path>
-      <path d="M 0 -6 L 18 -6 Q 30 0 18 6 L 0 6 Z" fill="#d5d8de"/>
-      <circle cx="15" cy="0" r="2.6" fill="#6fa8dc"/>
-      <path d="M 2 -6 L -4 -12 L 8 -6 Z M 2 6 L -4 12 L 8 6 Z" fill="#d4977a"/>
-    </g>
-  </g>
-</svg>`;
 
 /** Faint flight-dynamics backdrop behind the splash: orbit plot plus corner readouts. */
 const HUD = (projects: number) => `<div class="hud" aria-hidden="true">
@@ -194,6 +149,7 @@ export class App {
   private activeProjectId?: string;
   private layout: Layout = "focus";
   private sidebarHidden = false;
+  private sidebarWidth?: number;
   private completer = new Completer();
   private saveTimer?: number;
   private sidebarKey = "";
@@ -208,6 +164,7 @@ export class App {
   /** Session selected before the current one; split view pairs them. */
   private prevSelectedId?: string;
   private splitIds: string[] = [];
+  private gridProjectId?: string;
   private tracks: Record<string, Tracks> = {};
   /** Shape key and sizes of the tiled layout on screen. */
   private shape = { key: "", tracks: { cols: [1], rows: [1] } as Tracks };
@@ -235,10 +192,12 @@ export class App {
     if (saved) {
       this.projects = [];
       // Projects saved before colours existed get one in their original order.
-      for (const p of saved.projects) this.projects.push({ ...p, color: p.color ?? nextProjectColor(this.projects) });
+      for (const p of saved.projects) this.projects.push({ ...p, color: p.color ? currentProjectColor(p.color) : nextProjectColor(this.projects) });
       this.layout = saved.layout ?? "focus";
       this.sidebarHidden = saved.sidebarHidden ?? false;
+      this.sidebarWidth = saved.sidebarWidth;
       this.splitIds = saved.split ?? [];
+      this.gridProjectId = saved.gridProject;
       this.tracks = saved.tracks ?? {};
       for (const rec of saved.sessions) {
         const project = this.projects.find((p) => p.id === rec.projectId);
@@ -293,7 +252,9 @@ export class App {
         selectedId: this.selectedId,
         layout: this.layout,
         sidebarHidden: this.sidebarHidden,
+        sidebarWidth: this.sidebarWidth,
         split: this.splitIds,
+        gridProject: this.gridProjectId,
         tracks: this.tracks,
       };
       api.saveState(state).catch((e) => console.error("save failed", e));
@@ -366,6 +327,10 @@ export class App {
     }
     this.selectedId = id;
     const s = this.selected;
+    // A project grid follows the selection to its project.
+    if (s && this.gridProjectId) this.gridProjectId = s.project.id;
+    // Selecting a docked session brings it back into the grid.
+    if (s && this.layout === "grid" && s.rec.collapsed) s.rec.collapsed = false;
     if (s) {
       this.activeProjectId = s.project.id;
       s.needsAttention = false;
@@ -434,6 +399,34 @@ export class App {
     this.save();
   }
 
+  /** Applies a sidebar width clamped to its range; undefined restores the stylesheet default. */
+  private setSidebarWidth(px?: number) {
+    this.sidebarWidth = px === undefined ? undefined : Math.round(Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, px)));
+    const app = $("#app");
+    if (this.sidebarWidth === undefined) app.style.removeProperty("--sidebar-w");
+    else app.style.setProperty("--sidebar-w", `${this.sidebarWidth}px`);
+  }
+
+  /** Drags the sidebar's right edge to resize it; the grid refits through the stage's ResizeObserver. */
+  private dragSidebar(e: PointerEvent, handle: HTMLElement) {
+    const start = e.clientX;
+    const width = $("#sidebar").getBoundingClientRect().width;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add("dragging");
+    const move = (ev: PointerEvent) => this.setSidebarWidth(width + ev.clientX - start);
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      handle.classList.remove("dragging");
+      this.save();
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  }
+
   /** Renames the selected session in place, revealing its sidebar row first. */
   private renameSelected() {
     const s = this.selected;
@@ -456,9 +449,39 @@ export class App {
     this.setLayout("split");
   }
 
+  /** Puts a session in one side of the split, swapping sides if it already shows in the other. */
+  private placeInSplit(s: Session, slot: number) {
+    const other = this.splitIds.indexOf(s.rec.id);
+    if (other >= 0) this.splitIds[other] = this.splitIds[slot];
+    this.splitIds[slot] = s.rec.id;
+    this.select(s.rec.id);
+  }
+
+  /** Sessions the grid covers, docked ones included: the grid's project, else all. */
+  private gridSessions() {
+    const own = this.sessions.filter((s) => s.project.id === this.gridProjectId);
+    return own.length ? own : this.sessions;
+  }
+
+  /** Parks a grid pane in the dock, handing the selection to a pane still on stage. */
+  private collapse(s: Session) {
+    s.rec.collapsed = true;
+    const next = this.visibleSessions()[0];
+    if (s === this.selected && next) return this.select(next.rec.id);
+    this.renderAll();
+    this.save();
+  }
+
+  /** Moves a session before or after another of its project's sessions; the sidebar, grid and ⌘1–9 follow that order. */
+  private moveSession(s: Session, target: Session, after: boolean) {
+    this.sessions.splice(this.sessions.indexOf(s), 1);
+    this.sessions.splice(this.sessions.indexOf(target) + (after ? 1 : 0), 0, s);
+    this.save();
+  }
+
   /** Sessions on stage for the current layout; a split missing a session shows the selection alone. */
   private visibleSessions() {
-    if (this.layout === "grid") return this.sessions;
+    if (this.layout === "grid") return this.gridSessions().filter((s) => !s.rec.collapsed);
     if (this.layout === "split") {
       const pair = this.splitIds.map((id) => this.sessions.find((s) => s.rec.id === id)).filter((s): s is Session => !!s);
       if (pair.length === 2) return pair;
@@ -466,8 +489,14 @@ export class App {
     return this.sessions.filter((s) => s.rec.id === this.selectedId);
   }
 
-  private setLayout(layout: Layout) {
+  /** `project` limits the grid to that project's sessions. */
+  private setLayout(layout: Layout, project?: ProjectRec) {
     this.layout = layout;
+    this.gridProjectId = layout === "grid" ? project?.id : undefined;
+    if (project && this.selected?.project !== project) {
+      const first = this.sessions.find((s) => s.project === project);
+      if (first) return this.select(first.rec.id);
+    }
     this.renderAll();
     this.selected?.focus();
     this.save();
@@ -488,11 +517,13 @@ export class App {
       this.badge = waiting;
       getCurrentWindow().setBadgeCount(waiting || undefined).catch(() => {});
       const pill = $("#waiting-pill");
-      pill.textContent = `${waiting} waiting`;
+      pill.dataset.status = "attention";
+      pill.innerHTML = `${light()}${waiting} waiting`;
       pill.classList.toggle("hidden", !waiting);
     }
     this.renderSidebar();
     this.renderCrumbs();
+    this.renderDock();
   }
 
   // ── rendering ────────────────────────────────────────────────────────
@@ -502,6 +533,7 @@ export class App {
     this.renderSidebar();
     this.renderStage();
     this.renderCrumbs();
+    this.renderDock();
   }
 
   private renderSidebar() {
@@ -510,7 +542,7 @@ export class App {
       this.projects.map((p) => [p.id, p.collapsed]),
       this.activeProjectId,
       this.selectedId,
-      this.sessions.map((s) => [s.rec.name, s.status, s.title, s.cwd, s.runningCommand, s.waitingFor, s.stats?.cost_usd]),
+      this.sessions.map((s) => [s.rec.name, s.status, s.title, s.cwd, s.runningCommand, s.waitingFor]),
       this.projects.map((p) => gitBadge(this.projectGit.get(p.id))),
     ]);
     if (key === this.sidebarKey || this.renaming || this.reordering) return;
@@ -527,16 +559,18 @@ export class App {
               s.status === "attention" && s.waitingFor
                 ? s.waitingFor
                 : s.rec.kind === "claude" ? (!s.rec.autoName && s.title) || "claude code" : s.runningCommand ? `⟫ ${s.runningCommand}` : shortPath(s.cwd, home);
-            const cost = s.stats?.cost_usd != null ? `$${s.stats.cost_usd.toFixed(2)}` : "";
             return `<div class="sess${s.rec.id === this.selectedId ? " sel" : ""}" data-status="${s.status}" data-select="${s.rec.id}">
-              <span class="dot" role="img" aria-label="${status}" title="${status}"></span>
+              ${light(s.rec.kind, `${s.rec.kind === "claude" ? "Claude" : "Shell"} · ${status}`)}
               <div class="sess-body">
-                <div class="sess-line"><span class="sess-name" data-rename="${s.rec.id}">${escapeHtml(s.rec.name)}</span><span class="tag tag-${s.rec.kind}">${s.rec.kind === "claude" ? "CC" : "SH"}</span>${cost ? `<span class="sess-cost" title="${escapeHtml(statsLabel(s.stats))}">${cost}</span>` : ""}</div>
+                <div class="sess-line"><span class="sess-name" data-rename="${s.rec.id}">${escapeHtml(s.rec.name)}</span></div>
                 <div class="sess-sub" title="${escapeHtml(sub)}">${escapeHtml(sub)}</div>
               </div>
-              <span class="sess-key">${index <= 9 ? `⌘${index}` : ""}</span>
-              <button class="sess-edit" data-edit="${s.rec.id}" title="Rename (⌘⇧R)">✎</button>
-              <button class="sess-close" data-close="${s.rec.id}" title="Close session">×</button>
+              <div class="sess-tail">
+                <span class="sess-key">${index <= 9 ? `⌘${index}` : ""}</span>
+                <span class="sess-actions">
+                  <button class="sess-close" data-close="${s.rec.id}" title="Close session">${icon("close")}</button>
+                </span>
+              </div>
             </div>`;
           })
           .join("");
@@ -545,14 +579,15 @@ export class App {
         const badge = gitBadge(this.projectGit.get(p.id));
         return `<section class="proj${p.id === this.activeProjectId ? " active" : ""}${p.collapsed ? " collapsed" : ""}" style="--proj: ${p.color}">
           <div class="proj-head" data-project="${p.id}">
-            <button class="proj-toggle" data-collapse="${p.id}" title="${p.collapsed ? "Expand" : "Collapse"}" aria-expanded="${!p.collapsed}">▾</button>
+            <button class="proj-toggle" data-collapse="${p.id}" title="${p.collapsed ? "Expand" : "Collapse"}" aria-expanded="${!p.collapsed}">${icon("chevron")}</button>
             <span class="proj-name">${escapeHtml(p.name)}</span>
             ${p.collapsed ? `<span class="proj-path proj-summary${waiting ? " waiting" : ""}">${summary}</span>` : `<span class="proj-path">${escapeHtml(shortPath(p.path, home))}</span>`}
             ${badge ? `<button class="proj-git" data-diff="${p.id}" title="Show uncommitted changes (⌘D)">${badge}</button>` : ""}
             <span class="proj-actions">
-              <button data-new="claude" data-pid="${p.id}" title="New Claude agent">✽</button>
-              <button data-new="shell" data-pid="${p.id}" title="New shell">›_</button>
-              ${mine.length ? `<button aria-disabled="true" title="Close its sessions first">×</button>` : `<button data-remove="${p.id}" title="Remove project">×</button>`}
+              ${mine.length ? `<button data-grid="${p.id}" title="Open in grid">${icon("grid")}</button>` : ""}
+              <button data-new="claude" data-pid="${p.id}" title="New Claude agent">${icon("agent")}</button>
+              <button data-new="shell" data-pid="${p.id}" title="New shell">${icon("shell")}</button>
+              ${mine.length ? `<button aria-disabled="true" title="Close its sessions first">${icon("close")}</button>` : `<button data-remove="${p.id}" title="Remove project">${icon("close")}</button>`}
             </span>
           </div>
           ${p.collapsed ? "" : rows || `<div class="proj-empty">no sessions</div>`}
@@ -561,9 +596,13 @@ export class App {
       .join("");
     $("#projects").innerHTML = html || `<div class="side-empty">No projects yet<br><span>⌘O to add one</span></div>`;
 
-    const count = (st: string) => this.sessions.filter((s) => s.status === st).length;
-    const exited = count("exited");
-    $("#telemetry").innerHTML = `<span>${count("working")} working</span><span class="t-attention">${count("attention")} waiting</span><span>${count("idle")} standby</span>${exited ? `<span class="t-exited">${exited} exited</span>` : ""}`;
+    $("#telemetry").innerHTML = (["working", "attention", "idle", "exited"] as const)
+      .map((st) => {
+        const n = this.sessions.filter((s) => s.status === st).length;
+        const label = `${n} ${STATUS_LABEL[st].toLowerCase()}`;
+        return n ? `<span data-status="${st}" title="${label}" aria-label="${label}">${light()}${n}</span>` : "";
+      })
+      .join("");
   }
 
   /** Remaining plan usage per window, refreshed from what Claude Code last reported. */
@@ -592,10 +631,21 @@ export class App {
   private renderCrumbs() {
     const s = this.selected;
     const html = s
-      ? `<span class="c-proj" style="--proj: ${s.project.color}">${escapeHtml(s.project.name)}</span> <span class="c-dim">▸</span> <span class="c-sess">${escapeHtml(s.rec.name)}</span> <span class="c-dim">· ${escapeHtml(shortPath(s.cwd, this.shell.home))}</span>`
+      ? `<span class="c-proj" style="--proj: ${s.project.color}">${escapeHtml(s.project.name)}</span> <span class="c-dim">/</span> <span class="c-sess">${escapeHtml(s.rec.name)}</span> <span class="c-dim c-path">${escapeHtml(shortPath(s.cwd, this.shell.home))}</span>`
       : `<span class="c-dim">No active mission</span>`;
     const el = $("#crumbs");
     if (el.innerHTML !== html) el.innerHTML = html;
+  }
+
+  /** Chips for the grid's collapsed sessions; clicking one restores it. */
+  private renderDock() {
+    const docked = this.layout === "grid" ? this.gridSessions().filter((s) => s.rec.collapsed) : [];
+    const html = docked
+      .map((s) => `<button class="dock-item" data-status="${s.status}" data-restore="${s.rec.id}" style="--proj: ${s.project.color}" title="Restore ${escapeHtml(s.rec.name)} · ${STATUS_LABEL[s.status]}">${light(s.rec.kind)}${escapeHtml(s.rec.name)}</button>`)
+      .join("");
+    const el = $("#dock");
+    if (el.innerHTML !== html) el.innerHTML = html;
+    el.classList.toggle("hidden", !docked.length);
   }
 
   private renderStage() {
@@ -603,7 +653,7 @@ export class App {
     document.querySelectorAll<HTMLElement>("[data-layout]").forEach((b) => b.classList.toggle("on", b.dataset.layout === this.layout));
     if (!this.sessions.length) {
       stage.className = "stage empty";
-      stage.innerHTML = `${HUD(this.projects.length)}<div class="splash">${PLANET}<pre class="logo">${LOGO}</pre>
+      stage.innerHTML = `${HUD(this.projects.length)}<div class="splash">${mark()}<div class="splash-name">Houston</div>
         <div class="splash-sub">Mission control for Claude Code · v0.1</div>
         <div class="splash-keys">
           <div><kbd>⌘O</kbd> add project</div><div><kbd>⌘N</kbd> new Claude session</div>
@@ -614,13 +664,12 @@ export class App {
           <div><kbd>⌘F</kbd> find in terminal</div><div><kbd>⌘D</kbd> show changes</div>
           <div><kbd>⌘⇧P</kbd> aliases / servers</div>
         </div></div>`;
-      if (matchMedia("(prefers-reduced-motion: reduce)").matches) stage.querySelector<SVGSVGElement>(".planet")?.pauseAnimations();
       return;
     }
     stage.querySelectorAll(".splash, .hud").forEach((el) => el.remove());
     const visible = this.visibleSessions();
     // Split is a two-pane grid and shares its styling.
-    stage.className = `stage ${this.layout === "focus" ? "focus" : "grid"}`;
+    stage.className = `stage ${this.layout === "focus" ? "focus" : `grid${this.layout === "split" ? " split" : ""}`}`;
     for (const s of this.sessions) {
       if (!visible.includes(s)) s.el.remove();
     }
@@ -727,22 +776,35 @@ export class App {
     gutter.addEventListener("pointercancel", up);
   }
 
-  /** Drags a sidebar row to a new position among its project's sessions; the grid and ⌘1–9 follow that order. */
+  /**
+   * Drags a sidebar row to a new position among its project's sessions; the grid and ⌘1–9 follow that order.
+   * In split view, dropping it on a pane puts it in that side instead.
+   */
   private dragSession(e: PointerEvent) {
     const t = e.target as HTMLElement;
     const row = t.closest<HTMLElement>(".sess");
     const s = this.sessions.find((x) => x.rec.id === row?.dataset.select);
     if (!row || !s || e.button !== 0 || t.closest("button, input")) return;
-    const startY = e.clientY;
+    const [startX, startY] = [e.clientX, e.clientY];
     let drop: { s: Session; after: boolean } | null = null;
-    const clear = () => document.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
+    let slot = -1;
+    const clear = () =>
+      document.querySelectorAll(".drop-before, .drop-after, .drop-replace").forEach((el) => el.classList.remove("drop-before", "drop-after", "drop-replace"));
     const move = (ev: PointerEvent) => {
-      if (!this.reordering && Math.abs(ev.clientY - startY) < 5) return;
+      if (!this.reordering && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return;
       this.reordering = true;
       row.classList.add("dragging");
       clear();
       drop = null;
-      const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>(".sess");
+      slot = -1;
+      const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+      const pane = this.layout === "split" ? hit?.closest<HTMLElement>("#stage .pane") : null;
+      if (pane && pane.dataset.id !== s.rec.id) {
+        slot = this.splitIds.indexOf(pane.dataset.id!);
+        if (slot >= 0) pane.classList.add("drop-replace");
+        return;
+      }
+      const over = hit?.closest<HTMLElement>(".sess");
       const target = this.sessions.find((x) => x.rec.id === over?.dataset.select);
       if (!over || !target || target === s || target.project !== s.project) return;
       const r = over.getBoundingClientRect();
@@ -759,12 +821,48 @@ export class App {
       this.reordering = false;
       this.suppressClick = true;
       setTimeout(() => (this.suppressClick = false));
-      if (drop) {
-        this.sessions.splice(this.sessions.indexOf(s), 1);
-        this.sessions.splice(this.sessions.indexOf(drop.s) + (drop.after ? 1 : 0), 0, s);
-        this.save();
-      }
+      if (slot >= 0) return this.placeInSplit(s, slot);
+      if (drop) this.moveSession(s, drop.s, drop.after);
       this.renderAll();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
+  /** Drags a grid pane by its header onto another of its project's panes. */
+  private dragPane(e: PointerEvent) {
+    const t = e.target as HTMLElement;
+    const pane = t.closest<HTMLElement>(".pane");
+    const s = this.sessions.find((x) => x.rec.id === pane?.dataset.id);
+    if (this.layout !== "grid" || !pane || !s || e.button !== 0 || !t.closest(".pane-header") || t.closest("button")) return;
+    const [startX, startY] = [e.clientX, e.clientY];
+    let dragging = false;
+    let drop: { s: Session; after: boolean } | null = null;
+    const clear = () => document.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
+    const move = (ev: PointerEvent) => {
+      if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return;
+      dragging = true;
+      pane.classList.add("dragging");
+      clear();
+      drop = null;
+      const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>(".pane");
+      const target = this.sessions.find((x) => x.rec.id === over?.dataset.id);
+      if (!over || !target || target === s || target.project !== s.project) return;
+      const r = over.getBoundingClientRect();
+      drop = { s: target, after: ev.clientX > r.left + r.width / 2 };
+      over.classList.add(drop.after ? "drop-after" : "drop-before");
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      clear();
+      pane.classList.remove("dragging");
+      if (!drop) return;
+      this.moveSession(s, drop.s, drop.after);
+      this.renderAll();
+      this.selected?.focus();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -781,7 +879,9 @@ export class App {
   private async projectActions(p: ProjectRec): Promise<(MenuItem | null)[]> {
     const editor = EDITORS.find((c) => this.shell.commands.includes(c));
     const scripts = await api.npmScripts(p.path).catch(() => [] as string[]);
+    const hasSessions = this.sessions.some((s) => s.project === p);
     return [
+      ...(hasSessions ? [{ label: "Open in grid", run: () => this.setLayout("grid", p) }] : []),
       { label: "Show changes", hint: "⌘D", run: () => this.showChanges(p) },
       ...(editor ? [{ label: `Open in ${editor}`, run: () => api.launchDetached(p.path, `${editor} .`) }] : []),
       { label: "Reveal in Finder", run: () => api.launchDetached(p.path, "open .") },
@@ -832,7 +932,16 @@ export class App {
   // ── input ────────────────────────────────────────────────────────────
 
   private bindChrome() {
+    $("#brand-mark").outerHTML = mark();
+    fillIcons();
     $("#app").classList.toggle("no-sidebar", this.sidebarHidden);
+    this.setSidebarWidth(this.sidebarWidth);
+    const sidebarHandle = $("#sidebar-gutter");
+    sidebarHandle.addEventListener("pointerdown", (e) => this.dragSidebar(e, sidebarHandle));
+    sidebarHandle.addEventListener("dblclick", () => {
+      this.setSidebarWidth(undefined);
+      this.save();
+    });
     $("#waiting-pill").addEventListener("click", () => this.nextWaiting());
     $("#add-project").addEventListener("click", () => this.addProject());
     $("#open-aliases").addEventListener("click", () => this.aliases.open());
@@ -848,31 +957,32 @@ export class App {
       if (p) this.projectMenu(e, p);
     });
     $("#projects").addEventListener("click", (e) => {
-      if (this.suppressClick) return;
       const t = e.target as HTMLElement;
+      // Clicks inside the rename field must not select the row, which would blur and commit it.
+      if (this.suppressClick || t.closest(".rename")) return;
       const data = (attr: string) => t.closest<HTMLElement>(`[${attr}]`)?.getAttribute(attr) ?? undefined;
       const sessionById = (id?: string) => this.sessions.find((s) => s.rec.id === id);
       const project = this.projects.find((p) => p.id === data("data-collapse"));
       if (project) return this.toggleCollapsed(project);
-      const editing = sessionById(data("data-edit"));
-      const label = editing && t.closest(".sess")?.querySelector<HTMLElement>("[data-rename]");
-      if (editing && label) return this.startRename(label, editing);
       if (data("data-new") === "claude") return this.newAgent(data("data-pid"));
       if (data("data-new")) return this.newSession(data("data-new") as Kind, data("data-pid"));
+      const gridded = this.projects.find((p) => p.id === data("data-grid"));
+      if (gridded) return this.layout === "grid" && this.gridProjectId === gridded.id ? this.setLayout("focus") : this.setLayout("grid", gridded);
       const changed = this.projects.find((p) => p.id === data("data-diff"));
       if (changed) return this.showChanges(changed);
       if (data("data-remove")) return this.removeProject(data("data-remove")!);
       if (data("data-close")) return this.closeSession(sessionById(data("data-close")));
+      // The first click re-renders the sidebar, so a double-click is read from the click count
+      // rather than a dblclick event, which may not fire across the replaced row.
+      const row = t.closest(".sess");
+      const label = row?.querySelector<HTMLElement>("[data-rename]");
+      const named = sessionById(label?.dataset.rename);
+      if (e.detail === 2 && label && named) return this.startRename(label, named);
       if (data("data-select")) return this.select(data("data-select"));
       if (data("data-project")) {
         this.activeProjectId = data("data-project");
         this.renderAll();
       }
-    });
-    $("#projects").addEventListener("dblclick", (e) => {
-      const target = (e.target as HTMLElement).closest<HTMLElement>("[data-rename]");
-      const s = this.sessions.find((x) => x.rec.id === target?.dataset.rename);
-      if (target && s) this.startRename(target, s);
     });
 
     $("#stage").addEventListener("mousedown", (e) => {
@@ -891,10 +1001,17 @@ export class App {
       const t = e.target as HTMLElement;
       if (t.closest("[data-action=relaunch]")) this.selected?.launch();
       if (t.closest("[data-action=maximize]")) this.setLayout("focus");
+      const pane = this.sessions.find((s) => s.rec.id === t.closest<HTMLElement>(".pane")?.dataset.id);
+      if (pane && t.closest("[data-action=collapse]")) this.collapse(pane);
+    });
+    $("#dock").addEventListener("click", (e) => {
+      const id = (e.target as HTMLElement).closest<HTMLElement>("[data-restore]")?.dataset.restore;
+      if (id) this.select(id);
     });
     $("#stage").addEventListener("pointerdown", (e) => {
       const gutter = (e.target as HTMLElement).closest<HTMLElement>(".gutter");
       if (gutter) this.dragGutter(e, gutter);
+      else this.dragPane(e);
     });
     $("#stage").addEventListener("dblclick", (e) => {
       const t = e.target as HTMLElement;
