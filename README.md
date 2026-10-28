@@ -35,19 +35,27 @@ a name taken from what it's actually working on. When an agent finishes or needs
 | ♻️ **Resumable conversations** | Every agent has a fixed Claude Code session id, so closing Houston never loses a conversation. It resumes where it stopped. |
 | ⛽ **Plan limits** | Houston routes Claude Code's statusline through a tiny script and shows how much of your 5-hour and weekly limits is left. |
 | ⌨️ **Warp-style shell input** | zsh sessions get a command editor with syntax highlighting, history ghost text, `Tab` completion (commands, paths, git refs, npm scripts) and `⌃R` search. |
-| 🧭 **Focus & grid** | Look at one pane at a time, or all of them in a grid. |
+| 🧭 **Focus, grid & split** | Look at one pane at a time, all of them in a grid, or two side by side. Drag the gaps to resize panes (double-click resets), and drag sidebar rows to reorder. |
+| ✍️ **Mission briefs** | `⌘N` asks for an opening prompt, so a new agent starts working (and is named) right away. |
+| 💬 **Waiting previews** | A waiting agent shows its last question or message in the sidebar and in the notification. |
+| 💵 **Session usage** | Each Claude session shows its cost and context use, taken from Claude Code's statusline. |
+| 🧾 **Changes** | Projects with uncommitted work show a `+2 ~5 ?1` badge; click it (or `⌘D`) for a file-by-file diff. |
+| 🔎 **Find & palette** | `⌘F` searches a terminal's scrollback; `⌘P` jumps to any session, project action or command. |
+| 🖱️ **Project actions** | Right-click a project to open it in your editor or Finder, run an npm script, or open a pull request. |
 
 ## Controls
 
 | Keys | Action | | Keys | Action |
 |---|---|---|---|---|
 | `⌘O` | add project | | `⌘G` | toggle grid / focus |
-| `⌘N` | new Claude agent | | `⌘1`–`⌘9` | jump to session |
-| `⌘T` | new shell | | `⌘[` / `⌘]` | previous / next session |
-| `⌘W` | close session | | `⌘K` | clear terminal |
-| `⌘R` / `⏎` | relaunch an exited session | | `⇧⏎` | newline in Claude's prompt |
-| `⌘J` | next waiting session | | `⌘B` | toggle sidebar |
-| `⌘⇧R` | rename session | | | |
+| `⌘N` | new Claude agent (with brief) | | `⌘\` | toggle split view |
+| `⌘T` | new shell | | `⌘1`–`⌘9` | jump to session |
+| `⌘W` | close session | | `⌘[` / `⌘]` | previous / next session |
+| `⌘R` / `⏎` | relaunch an exited session | | `⌘K` | clear terminal |
+| `⌘J` | next waiting session | | `⇧⏎` | newline in Claude's prompt |
+| `⌘⇧R` | rename session | | `⌘B` | toggle sidebar |
+| `⌘P` | command palette | | `⌘F` | find in terminal |
+| `⌘⇧P` | aliases | | `⌘D` | show uncommitted changes |
 
 ## Launch sequence
 
