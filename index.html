@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Houston</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <div class="brand" data-tauri-drag-region>
+          <span class="brand-mark" data-tauri-drag-region>◉</span>
+          <span class="brand-name" data-tauri-drag-region>Houston</span>
+          <span class="brand-sub" data-tauri-drag-region>MISSION CONTROL</span>
+        </div>
+        <div id="projects"></div>
+        <div class="sidebar-foot">
+          <button id="add-project">+ Add project <kbd>⌘O</kbd></button>
+          <div id="telemetry"></div>
+          <div id="limits"></div>
+        </div>
+      </aside>
+      <main>
+        <header id="topbar" data-tauri-drag-region>
+          <div id="crumbs" data-tauri-drag-region></div>
+          <div class="actions">
+            <button id="new-claude" class="btn-claude">✦ Claude <kbd>⌘N</kbd></button>
+            <button id="new-shell">›_ Shell <kbd>⌘T</kbd></button>
+            <div class="seg">
+              <button data-layout="focus">Focus</button>
+              <button data-layout="grid">Grid</button>
+            </div>
+          </div>
+        </header>
+        <section id="stage" class="stage"></section>
+      </main>
+    </div>
+    <div id="boot"><pre>Establishing uplink…</pre></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
