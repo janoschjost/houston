@@ -76,11 +76,16 @@ fn home() -> PathBuf {
     env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
+/// Where the user's own zsh startup files live.
+pub fn user_zdotdir() -> PathBuf {
+    env::var("ZDOTDIR").map(PathBuf::from).unwrap_or_else(|_| home())
+}
+
 fn info() -> &'static ShellInfo {
     INFO.get_or_init(|| {
         let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
         let integrated = shell.ends_with("zsh");
-        let user_zdotdir = env::var("ZDOTDIR").map(PathBuf::from).unwrap_or_else(|_| home());
+        let user_zdotdir = user_zdotdir();
         let (path, mut names) = probe_login_shell(&shell, integrated);
         names.extend(path_executables(&path));
         ShellInfo {
@@ -326,6 +331,56 @@ pub async fn git_status(cwd: String) -> Option<GitStatus> {
         s.branch = oid.get(..7).unwrap_or(oid).to_string();
     }
     Some(s)
+}
+
+/// Upper bound on the diff text sent to the UI; a huge generated file must not freeze the panel.
+const DIFF_LIMIT: usize = 4 << 20;
+
+/// Unified diff of the working tree against HEAD, with untracked files shown as additions.
+#[tauri::command]
+pub async fn git_diff(cwd: String) -> String {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(["-C", &cwd, "--no-optional-locks"])
+            .args(args)
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+    };
+    // A repository without commits has no HEAD; its staged and unstaged changes are then the whole diff.
+    let mut diff = git(&["diff", "HEAD", "--no-color", "--no-ext-diff"])
+        .filter(|o| o.status.success())
+        .or_else(|| git(&["diff", "--no-color", "--no-ext-diff"]))
+        .map(|o| o.stdout)
+        .unwrap_or_default();
+    let untracked = git(&["ls-files", "--others", "--exclude-standard", "-z"]).map(|o| o.stdout).unwrap_or_default();
+    for file in untracked.split(|&b| b == 0).filter(|f| !f.is_empty()) {
+        if diff.len() > DIFF_LIMIT {
+            break;
+        }
+        let file = String::from_utf8_lossy(file);
+        // --no-index exits 1 when the files differ, which they always do here.
+        if let Some(o) = git(&["diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", &file]) {
+            diff.extend(o.stdout);
+        }
+    }
+    diff.truncate(DIFF_LIMIT);
+    String::from_utf8_lossy(&diff).into_owned()
+}
+
+/// Runs a command in the user's login shell without a terminal, e.g. opening an editor or Finder.
+#[tauri::command]
+pub async fn launch_detached(cwd: String, command: String) -> Result<(), String> {
+    let mut child = Command::new(&info().shell)
+        .args(["-l", "-c", &command])
+        .current_dir(&cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    thread::spawn(move || child.wait());
+    Ok(())
 }
 
 #[tauri::command]

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod aliases;
 mod limits;
 mod pty;
 mod shell;
@@ -66,12 +67,18 @@ fn main() {
             shell::complete_path,
             shell::git_refs,
             shell::git_status,
+            shell::git_diff,
+            shell::launch_detached,
             shell::npm_scripts,
             shell::claude_session_exists,
             shell::load_state,
             shell::save_state,
             limits::claude_status_line,
             limits::claude_limits,
+            limits::claude_session_stats,
+            aliases::list_aliases,
+            aliases::save_alias,
+            aliases::delete_alias,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Houston");
