@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { icon } from "./icons";
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -55,7 +56,7 @@ export class DiffPanel {
     this.el = document.createElement("div");
     this.el.className = "palette-backdrop diff-backdrop hidden";
     this.el.innerHTML = `<div class="diff" role="dialog" aria-label="Changes">
-      <div class="diff-head"><span class="diff-title"></span><button data-refresh title="Refresh">↻</button><button data-close title="Close (esc)">×</button></div>
+      <div class="diff-head"><span class="diff-title"></span><button data-refresh title="Refresh">${icon("refresh")}</button><button data-close title="Close (esc)">${icon("close")}</button></div>
       <div class="diff-main"><div class="diff-files" role="listbox"></div><div class="diff-body"></div></div>
     </div>`;
     this.listEl = this.el.querySelector(".diff-files")!;

@@ -1,3 +1,5 @@
+import { icon } from "./icons";
+
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export interface Command {
@@ -131,7 +133,7 @@ export class BriefDialog {
     this.el = document.createElement("div");
     this.el.className = "palette-backdrop hidden";
     this.el.innerHTML = `<div class="palette brief" role="dialog" aria-label="New Claude agent">
-      <div class="brief-head">✽ New agent in <span class="brief-proj"></span></div>
+      <div class="brief-head">${icon("agent")} New agent in <span class="brief-proj"></span></div>
       <textarea rows="4" placeholder="Mission brief: what should this agent do? Leave empty to start a blank session." spellcheck="false" aria-label="Opening prompt"></textarea>
       <div class="pal-foot"><span><kbd>⏎</kbd> launch</span><span><kbd>⇧⏎</kbd> newline</span><span><kbd>esc</kbd> cancel</span></div>
     </div>`;

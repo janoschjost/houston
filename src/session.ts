@@ -5,6 +5,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { api, type GitStatus, type SessionStats, type ShellInfo } from "./api";
 import type { Completer } from "./completion";
+import { icon, light } from "./icons";
 import { CommandInput } from "./input";
 
 export type Kind = "claude" | "shell";
@@ -25,7 +26,16 @@ export interface ProjectRec {
 }
 
 /** Project accents, assigned in order to new projects; hues chosen to stay apart from status colours. */
-export const PROJECT_COLORS = ["#6fa8dc", "#d4977a", "#a39bc4", "#86b8b8", "#c8a65c", "#b48ead", "#8fbf8f", "#d98ab0"];
+export const PROJECT_COLORS = ["#8cc8f0", "#eba582", "#c3a6e8", "#86cfd6", "#d6b46a", "#a9b8ff", "#9fd3a8", "#ec9cc0"];
+
+/** Project colours saved before the rev D palette, mapped onto their replacements by position. */
+const OLD_PROJECT_COLORS = ["#6fa8dc", "#d4977a", "#a39bc4", "#86b8b8", "#c8a65c", "#b48ead", "#8fbf8f", "#d98ab0"];
+
+/** A saved project colour in the current palette; colours from the old palette move to their replacement. */
+export function currentProjectColor(color: string) {
+  const i = OLD_PROJECT_COLORS.indexOf(color);
+  return i < 0 ? color : PROJECT_COLORS[i];
+}
 
 /** First palette colour no project uses yet, cycling once all are taken. */
 export function nextProjectColor(projects: ProjectRec[]) {
@@ -43,6 +53,8 @@ export interface SessionRec {
   /** Claude Code conversation id, so the session can be resumed after a restart. */
   claudeId?: string;
   createdAt: number;
+  /** Left out of the grid and parked in its dock. */
+  collapsed?: boolean;
 }
 
 export interface SessionContext {
@@ -53,22 +65,23 @@ export interface SessionContext {
   isSelected(s: Session): boolean;
 }
 
+/** Terminal palette built from the style.css tokens. */
 const THEME: ITheme = {
-  background: "#0B0E1400", // transparent: the pane's translucent fill and the backdrop show through
-  foreground: "#D5D8DE",
-  cursor: "#6FA8DC",
-  cursorAccent: "#0B0E14",
-  selectionBackground: "#6FA8DC40",
-  black: "#161C27", red: "#D77A7A", green: "#8FBF8F", yellow: "#D9B36C",
-  blue: "#6FA8DC", magenta: "#B48EAD", cyan: "#86B8B8", white: "#D5D8DE",
-  brightBlack: "#5C626D", brightRed: "#E39797", brightGreen: "#A8CFA8", brightYellow: "#E5C68F",
-  brightBlue: "#99B9D9", brightMagenta: "#C8A6C2", brightCyan: "#A3CBCB", brightWhite: "#F0F2F5",
+  background: "#0B122000", // transparent: the pane's translucent fill and the backdrop show through
+  foreground: "#E1E9F5",
+  cursor: "#8CC8F0",
+  cursorAccent: "#0B1220",
+  selectionBackground: "#8CC8F040",
+  black: "#152036", red: "#F08A83", green: "#8FD8B4", yellow: "#F3C86F",
+  blue: "#8CC8F0", magenta: "#C3A6E8", cyan: "#86CFD6", white: "#E1E9F5",
+  brightBlack: "#5D6F8C", brightRed: "#F6A8A2", brightGreen: "#AEE5CA", brightYellow: "#F7D896",
+  brightBlue: "#B3DBF6", brightMagenta: "#D6C2F0", brightCyan: "#A9DEE3", brightWhite: "#F4F8FD",
 };
 
 const SEARCH: ISearchOptions = {
   decorations: {
-    matchBackground: "#3a4a63", matchOverviewRuler: "#6fa8dc",
-    activeMatchBackground: "#8a6a2a", activeMatchColorOverviewRuler: "#d9b36c",
+    matchBackground: "#2a3c58", matchOverviewRuler: "#8cc8f0",
+    activeMatchBackground: "#7a6230", activeMatchColorOverviewRuler: "#f3c86f",
   },
 };
 
@@ -143,66 +156,57 @@ function accentFor(r: number, g: number, b: number, accent: [number, number, num
 const PARTIAL_CSI = /\x1b(\[[\d;:]*)?$/;
 
 /**
- * Ringed planet as a pixel grid, two pixels per terminal cell: H/B/D lit, mid and shadowed planet,
- * R/r front and back of the ring, M moon, `*` and `.` stars.
+ * Houston's mark as a pixel grid for the terminal banner, two pixels per cell: ink ring, planet shaded in
+ * the project accent, and the coral satellite at 45° with a halo cutting the ring, as on an idle light.
  */
-const PLANET = [
-  "                        *  ",
-  " *         HHHHH      MM   ",
-  "          HHHHHBB     MM   ",
-  "         HHHHBBBBB         ",
-  "       rrHHHBBBBBBDrrrrr   ",
-  "   rrrr  HHHBBBBBBDD  rrrr ",
-  " rrr    HBBBBBBBDDDD    rrr",
-  " RRR    BBBBBBBDDDDD    RRR",
-  "   RRRRRRRRRRRRRRRRRRRRRR  ",
-  "         BBBDDDDDDD        ",
-  "      .    DDDDDD       .  ",
-  "                           ",
-];
-
-/** Renders PLANET with half blocks, the planet shaded in the project accent. */
-function planetArt(color: string) {
+function markArt(color: string) {
   const [h, s, l] = toHsl(...(rgb(color).split(";").map(Number) as [number, number, number]));
   const shade = (dl: number) => fromHsl(h, s, Math.min(0.9, Math.max(0.1, l + dl)));
-  const pixel: Record<string, string> = {
-    H: shade(0.12), B: shade(0), D: shade(-0.18), R: rgb("#a39bc4"), r: rgb("#5f5a7a"), M: rgb("#d4977a"),
+  // A half-block pixel is about 1.24 times taller than wide at 13px with line height 1.15, so x is stretched.
+  const ASPECT = 1.24, W = 21, H = 16, cx = 10, cy = 7.5, R = 6.6;
+  const sx = R * Math.SQRT1_2, sy = cy - R * Math.SQRT1_2;
+  const pixel = (x: number, y: number) => {
+    const dx = (x - cx) / ASPECT;
+    const d = Math.hypot(dx, y - cy), ds = Math.hypot(dx - sx, y - sy);
+    if (ds < 1.3) return rgb("#eba582");
+    if (ds < 2.4) return null;
+    if (d < 3.3) return shade(dx + y < cy - 1 ? 0.12 : dx + y > cy + 1 ? -0.18 : 0);
+    if (Math.abs(d - R) < 0.7) return rgb("#8cc8f0");
+    return null;
   };
-  const star: Record<string, string> = { "*": "*", ".": "·" };
   const rows: string[] = [];
-  for (let y = 0; y < PLANET.length; y += 2) {
+  for (let y = 0; y < H; y += 2) {
     let row = "";
-    for (let x = 0; x < PLANET[y].length; x++) {
-      const t = PLANET[y][x], b = PLANET[y + 1][x];
-      const st = star[t] ?? star[b];
-      if (st) row += `${fg("#56648a")}${st}`;
-      else if (t === " " && b === " ") row += " ";
-      else if (t === b) row += `\x1b[38;2;${pixel[t]}m█`;
-      else if (t === " ") row += `\x1b[38;2;${pixel[b]}m▄`;
-      else if (b === " ") row += `\x1b[38;2;${pixel[t]}m▀`;
-      else row += `\x1b[38;2;${pixel[t]};48;2;${pixel[b]}m▀\x1b[49m`;
+    for (let x = 0; x < W; x++) {
+      const t = pixel(x, y), b = pixel(x, y + 1);
+      if (!t && !b) row += " ";
+      else if (t === b) row += `\x1b[38;2;${t}m█`;
+      else if (!t) row += `\x1b[38;2;${b}m▄`;
+      else if (!b) row += `\x1b[38;2;${t}m▀`;
+      else row += `\x1b[38;2;${t};48;2;${b}m▀\x1b[49m`;
     }
     rows.push(row);
   }
   return rows;
 }
 
-/** Mission patch printed into a new terminal before its process starts: ringed planet plus launch readout. */
+/** Banner printed into a new terminal before its process starts: the mark plus a launch readout. */
 function banner(rec: SessionRec, project: ProjectRec, home: string) {
-  const dim = fg("#56648a"), title = fg("#d4977a"), text = fg("#d5d8de"), reset = "\x1b[0m";
+  const dim = fg("#5d6f8c"), title = fg("#8cc8f0"), text = fg("#e1e9f5"), reset = "\x1b[0m";
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const fit = (s: string) => (s.length > 40 ? s.slice(0, 39) + "…" : s);
-  const art = planetArt(project.color);
+  const art = markArt(project.color);
   const info = [
-    `${title}HOUSTON ${dim}· mission control`,
+    "",
+    `${title}H O U S T O N   ${dim}MISSION CONTROL`,
     `${dim}${"─".repeat(26)}`,
     `${dim}FLIGHT  ${text}${fit(rec.name)}`,
     `${dim}CRAFT   ${text}${rec.kind === "claude" ? "CC · claude code" : "SH · shell"}`,
     `${dim}PAD     ${text}${fit(shortPath(project.path, home))}`,
     `${dim}T-0     ${text}${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())} ${dim}· all stations go`,
   ];
-  return "\r\n" + art.map((a, i) => `${a}   ${info[i]}${reset}`).join("\r\n") + "\r\n\r\n";
+  return "\r\n" + art.map((a, i) => `${a}   ${info[i] ?? ""}${reset}`).join("\r\n") + "\r\n\r\n";
 }
 
 /** One terminal session (Claude Code or shell): its PTY, xterm view, status tracking and pane DOM. */
@@ -251,14 +255,14 @@ export class Session {
     this.el.className = `pane kind-${rec.kind}`;
     this.el.dataset.id = rec.id;
     this.el.style.setProperty("--proj", project.color);
-    this.el.innerHTML = `<div class="pane-header"><span class="dot" role="img"></span><span class="pane-name"></span><span class="pane-title"></span><button class="pane-max" data-action="maximize" title="Focus this session (⌘G)">⤢</button></div><div class="pane-search hidden" role="search"><input placeholder="Find" spellcheck="false" autocomplete="off" aria-label="Find in terminal" /><span class="ps-count"></span><button data-find="prev" title="Previous (⇧⏎)">↑</button><button data-find="next" title="Next (⏎)">↓</button><button data-find="close" title="Close (esc)">×</button></div><div class="pane-term"></div><div class="pane-footer"><div class="strip"></div></div>`;
+    this.el.innerHTML = `<div class="pane-header">${light(rec.kind, STATUS_LABEL.dormant)}<span class="pane-name"></span><span class="pane-title"></span><button class="pane-min" data-action="collapse" title="Collapse to dock">${icon("collapse")}</button><button class="pane-max" data-action="maximize" title="Focus this session (⌘G)">${icon("focus")}</button></div><div class="pane-search hidden" role="search"><input placeholder="Find" spellcheck="false" autocomplete="off" aria-label="Find in terminal" /><span class="ps-count"></span><button data-find="prev" title="Previous (⇧⏎)">↑</button><button data-find="next" title="Next (⏎)">↓</button><button data-find="close" title="Close (esc)">${icon("close")}</button></div><div class="pane-term"></div><div class="pane-footer"><div class="strip"></div></div>`;
     this.termEl = this.el.querySelector(".pane-term")!;
     this.stripEl = this.el.querySelector(".strip")!;
     this.searchEl = this.el.querySelector(".pane-search")!;
     this.searchInput = this.searchEl.querySelector("input")!;
 
     this.term = new Terminal({
-      fontFamily: '"JetBrains Mono", Menlo, monospace',
+      fontFamily: '"IBM Plex Mono", Menlo, monospace',
       fontSize: 13,
       lineHeight: 1.15,
       cursorBlink: true,
@@ -518,9 +522,9 @@ export class Session {
   /** Header and footer strip for the current state. */
   render() {
     this.el.dataset.status = this.status;
-    const dot = this.el.querySelector<HTMLElement>(".pane-header .dot")!;
-    dot.title = STATUS_LABEL[this.status];
-    dot.setAttribute("aria-label", STATUS_LABEL[this.status]);
+    const st = this.el.querySelector<SVGElement>(".pane-header .st")!;
+    st.setAttribute("aria-label", STATUS_LABEL[this.status]);
+    st.querySelector("title")!.textContent = STATUS_LABEL[this.status];
     this.el.querySelector(".pane-name")!.textContent = this.rec.name;
     this.el.querySelector(".pane-title")!.textContent = this.title || shortPath(this.cwd, this.ctx.shell.home);
     const showInput = this.inputActive;

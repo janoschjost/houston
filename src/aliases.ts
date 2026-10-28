@@ -1,5 +1,6 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { api, type Alias } from "./api";
+import { icon } from "./icons";
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -105,8 +106,8 @@ export class AliasPalette {
             (a, i) => `<div class="pal-row${i === this.index ? " sel" : ""}" data-i="${i}" role="option" aria-selected="${i === this.index}">
               <span class="pal-name">${escapeHtml(a.name)}</span>
               <code class="pal-cmd" title="${escapeHtml(a.command)}">${escapeHtml(a.command)}</code>
-              ${a.editable ? `<button data-edit title="Edit (⌘E)">✎</button>` : `<span class="pal-ro" title="Uses shell expansions; edit it in .zshrc">ro</span>`}
-              <button data-delete title="Delete (⌘⌫)">×</button>
+              ${a.editable ? `<button data-edit title="Edit (⌘E)">${icon("edit")}</button>` : `<span class="pal-ro" title="Uses shell expansions; edit it in .zshrc">ro</span>`}
+              <button data-delete title="Delete (⌘⌫)">${icon("close")}</button>
             </div>`,
           )
           .join("")
