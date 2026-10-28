@@ -116,6 +116,8 @@ export class App {
       this.layout = saved.layout ?? "focus";
       for (const rec of saved.sessions) {
         const project = this.projects.find((p) => p.id === rec.projectId);
+        // Sessions from before auto-naming still carry their placeholder name.
+        if (rec.kind === "claude" && rec.autoName === undefined && /^agent-\d+$/.test(rec.name)) rec.autoName = true;
         if (project) this.sessions.push(this.makeSession(rec, project));
       }
       this.selectedId = this.sessions.find((s) => s.rec.id === saved.selectedId)?.rec.id ?? this.sessions[0]?.rec.id;
@@ -139,6 +141,7 @@ export class App {
       shell: this.shell,
       completer: this.completer,
       changed: () => this.renderSidebar(),
+      persist: () => this.save(),
       isSelected: (s) => s.rec.id === this.selectedId,
     });
   }
@@ -184,7 +187,8 @@ export class App {
       id: crypto.randomUUID(),
       projectId: project.id,
       kind,
-      name: `${kind === "claude" ? "agent" : "tty"}-${String(siblings + 1).padStart(2, "0")}`,
+      name: kind === "claude" ? "new agent" : `tty-${String(siblings + 1).padStart(2, "0")}`,
+      autoName: kind === "claude" || undefined,
       claudeId: kind === "claude" ? crypto.randomUUID() : undefined,
       createdAt: Date.now(),
     };
@@ -228,7 +232,10 @@ export class App {
 
   private rename(s: Session, name: string) {
     const clean = name.trim();
-    if (clean) s.rec.name = clean;
+    if (clean && clean !== s.rec.name) {
+      s.rec.name = clean;
+      s.rec.autoName = false;
+    }
     s.render();
     this.renderAll();
     this.save();
@@ -293,7 +300,7 @@ export class App {
         const rows = mine
           .map((s) => {
             const index = this.sessions.indexOf(s) + 1;
-            const sub = s.rec.kind === "claude" ? s.title || "claude code" : s.runningCommand ? `⟫ ${s.runningCommand}` : shortPath(s.cwd, home);
+            const sub = s.rec.kind === "claude" ? (!s.rec.autoName && s.title) || "claude code" : s.runningCommand ? `⟫ ${s.runningCommand}` : shortPath(s.cwd, home);
             n++;
             return `<div class="sess${s.rec.id === this.selectedId ? " sel" : ""}" data-status="${s.status}" data-select="${s.rec.id}">
               <span class="dot"></span>

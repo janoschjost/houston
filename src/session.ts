@@ -20,6 +20,8 @@ export interface SessionRec {
   projectId: string;
   kind: Kind;
   name: string;
+  /** Name follows Claude Code's terminal title until the user renames the session. */
+  autoName?: boolean;
   /** Claude Code conversation id, so the session can be resumed after a restart. */
   claudeId?: string;
   createdAt: number;
@@ -29,6 +31,7 @@ export interface SessionContext {
   shell: ShellInfo;
   completer: Completer;
   changed(): void;
+  persist(): void;
   isSelected(s: Session): boolean;
 }
 
@@ -113,6 +116,7 @@ export class Session {
     this.term.onBinary((d) => this.typed(d));
     this.term.onTitleChange((t) => {
       this.title = t;
+      this.adoptTitle(t);
       this.ctx.changed();
     });
     this.term.onResize(({ cols, rows }) => this.ptyId && api.resize(this.ptyId, cols, rows));
@@ -151,6 +155,16 @@ export class Session {
     new ResizeObserver(() => this.fitSoon()).observe(this.termEl);
     this.el.querySelector(".pane-term")!.addEventListener("mousedown", () => setTimeout(() => this.focus()));
     this.render();
+  }
+
+  /** Names an auto-named Claude session after the topic Claude Code puts in the title ("✳ Fix login bug"). */
+  private adoptTitle(title: string) {
+    if (!this.rec.autoName) return;
+    const topic = title.replace(/^[^\p{L}\p{N}]+/u, "").trim();
+    if (!topic || topic === "Claude Code" || topic === this.rec.name) return;
+    this.rec.name = topic;
+    this.render();
+    this.ctx.persist();
   }
 
   get integrated() {
@@ -240,7 +254,7 @@ export class Session {
     const settings = shellQuote(JSON.stringify({ statusLine: { type: "command", command: await api.claudeStatusLine() } }));
     const claude = (await api.claudeSessionExists(id))
       ? `exec claude --settings ${settings} --resume ${id}`
-      : `exec claude --settings ${settings} --session-id ${id} -n ${shellQuote(this.rec.name)}`;
+      : `exec claude --settings ${settings} --session-id ${id}${this.rec.autoName ? "" : ` -n ${shellQuote(this.rec.name)}`}`;
     // Interactive login shell so PATH and the user's environment match their normal terminal.
     return { program: shell, args: ["-l", "-i", "-c", claude], env: {} };
   }
