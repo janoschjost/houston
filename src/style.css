@@ -152,6 +152,15 @@ button:focus-visible {
   direction: rtl;
   text-align: left;
 }
+.proj-git {
+  color: var(--amber);
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.proj-git:hover { background: #d9b36c14; }
 .proj-actions { display: flex; gap: 2px; opacity: 0.35; transition: opacity 0.15s; }
 .proj-head:hover .proj-actions, .proj.active .proj-actions { opacity: 1; }
 .proj-actions button {
@@ -196,7 +205,11 @@ button:focus-visible {
 .sess.sel::before { border-left-color: var(--proj); }
 .sess-body { min-width: 0; }
 .sess-line { display: flex; align-items: center; gap: 6px; }
-.sess-name { font-weight: 600; color: var(--text); }
+.sess-name { font-weight: 600; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-cost { margin-left: auto; color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+.sess.dragging { opacity: 0.5; }
+.sess.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+.sess.drop-after { box-shadow: 0 2px 0 var(--accent); }
 .sess-sub {
   color: var(--dim);
   font-size: 10.5px;
@@ -438,8 +451,18 @@ main {
   grid-auto-rows: minmax(0, 1fr);
   gap: 8px;
   padding: 8px;
+  position: relative;
 }
 .stage.focus { padding: 0; gap: 0; }
+
+/* resize handles over the gaps between tiled panes */
+.gutter { position: absolute; z-index: 3; }
+.gutter.col { width: 8px; translate: -50% 0; cursor: col-resize; }
+.gutter.row { height: 8px; translate: 0 -50%; cursor: row-resize; }
+.gutter::after { content: ""; position: absolute; inset: 0; margin: auto; border-radius: 1px; background: var(--accent); opacity: 0; transition: opacity 0.15s; }
+.gutter.col::after { width: 2px; }
+.gutter.row::after { height: 2px; }
+.gutter:hover::after, .gutter.dragging::after { opacity: 0.6; }
 .stage.empty {
   display: grid;
   place-items: center;
@@ -588,6 +611,38 @@ main {
 
 .pane-footer { flex: none; position: relative; }
 
+/* ⌘F find bar, floating over the terminal's top-right corner */
+.pane-search {
+  position: absolute;
+  top: 34px;
+  right: 14px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--panel);
+  border: 1px solid var(--border-hi);
+  border-radius: 5px;
+  box-shadow: 0 8px 24px #0008;
+}
+.stage.focus .pane-search { top: 8px; }
+.pane-search input {
+  width: 180px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-hi);
+  border-radius: 3px;
+  padding: 3px 6px;
+  outline: none;
+  user-select: text;
+}
+.pane-search input:focus { border-color: var(--accent); }
+.ps-count { min-width: 56px; color: var(--dim); font-size: 10px; text-align: right; }
+.pane-search button { width: 18px; color: var(--dim); }
+.pane-search button:hover { color: var(--text); }
+
 .strip {
   display: flex;
   align-items: center;
@@ -608,6 +663,7 @@ main {
 .s-idle { color: var(--dim); }
 .s-booting, .s-dormant { color: var(--violet); }
 .s-exit { color: var(--red); }
+.s-stats { color: var(--text); font-variant-numeric: tabular-nums; }
 .relaunch {
   margin-left: auto;
   color: var(--text);
@@ -804,6 +860,92 @@ main {
 .pal-error { flex: 1; color: var(--red); }
 .pal-foot { display: flex; gap: 14px; padding: 7px 10px; border-top: 1px solid var(--border); color: var(--dim); font-size: 10px; }
 .pal-foot kbd { margin: 0 3px 0 0; }
+
+/* ── command palette, brief, menu ────────────────────────────────────── */
+
+.cmd-row { grid-template-columns: minmax(80px, 260px) 1fr auto; }
+.cmd-row kbd { margin: 0; }
+
+.brief { padding: 12px; gap: 10px; }
+.brief-head { color: var(--dim); }
+.brief-proj { font-weight: 600; }
+.brief textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-hi);
+  border-radius: 4px;
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+  user-select: text;
+}
+.brief textarea:focus { border-color: var(--accent); }
+.brief .pal-foot { padding: 0; border: 0; }
+
+.ctx-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 200px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border-hi);
+  border-radius: 5px;
+  box-shadow: 0 12px 32px #000a;
+}
+.ctx-menu button { display: flex; width: 100%; gap: 12px; padding: 5px 10px; border-radius: 3px; text-align: left; }
+.ctx-menu button:hover { background: var(--raised); }
+.ctx-menu kbd { margin-left: auto; }
+.ctx-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; }
+
+/* ── changes panel ───────────────────────────────────────────────────── */
+
+.diff-backdrop { padding: 5vh 16px; outline: none; }
+.diff {
+  width: min(1200px, 100%);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border-hi);
+  border-radius: 6px;
+  box-shadow: 0 18px 50px #000a;
+  overflow: hidden;
+}
+.diff-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.diff-title { flex: 1; font-weight: 600; }
+.diff-head button { color: var(--dim); font-size: 14px; width: 18px; }
+.diff-head button:hover { color: var(--text); }
+.diff-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 30%) 1fr; }
+.diff-files { overflow-y: auto; padding: 4px; border-right: 1px solid var(--border); }
+.diff-file {
+  display: grid;
+  grid-template-columns: 14px 1fr auto auto;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.diff-file:hover { background: #ffffff06; }
+.diff-file.sel { background: var(--raised); }
+.df-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.df-mark { font-weight: 700; }
+.df-added { color: var(--green); }
+.df-deleted { color: var(--red); }
+.df-modified { color: var(--amber); }
+.df-renamed { color: var(--violet); }
+.df-add, .dl-add { color: var(--green); }
+.df-del, .dl-del { color: var(--red); }
+.df-add, .df-del { font-size: 10px; font-variant-numeric: tabular-nums; }
+.diff-body { overflow: auto; user-select: text; }
+.diff-body pre { margin: 0; padding: 8px 0; font: 11.5px/1.45 var(--mono); }
+.diff-body pre > div { padding: 0 12px; white-space: pre; min-width: max-content; }
+.dl-add { background: #8fbf8f14; }
+.dl-del { background: #d77a7a14; }
+.dl-hunk { color: var(--accent); background: #6fa8dc0f; margin-top: 6px; }
+.dl-note { color: var(--dim); }
 
 /* last, so it wins over the status and fuel animations declared above */
 @media (prefers-reduced-motion: reduce) {
