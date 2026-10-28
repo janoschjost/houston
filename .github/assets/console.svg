@@ -1,45 +1,79 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="250" viewBox="0 0 900 250" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">
-  <rect width="900" height="250" rx="12" fill="#0b0e14" stroke="#1e2533"/>
-  <circle cx="20" cy="18" r="5" fill="#d77a7a"/><circle cx="38" cy="18" r="5" fill="#d9b36c"/><circle cx="56" cy="18" r="5" fill="#8fbf8f"/>
-  <text x="450" y="22" fill="#6f7a8e" text-anchor="middle">houston ▸ Fix login redirect loop · ~/code/shop</text>
-  <line x1="0" y1="36" x2="900" y2="36" stroke="#1e2533"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="268" viewBox="0 0 900 268" font-family="'IBM Plex Sans', -apple-system, 'Helvetica Neue', sans-serif" font-size="12.5">
+  <defs>
+    <pattern id="minor" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#8cc8f0" stroke-opacity=".05"/></pattern>
+    <clipPath id="win"><rect width="900" height="268" rx="12"/></clipPath>
+  </defs>
+  <g clip-path="url(#win)">
+    <rect width="900" height="268" fill="#0b1220"/>
+    <rect x="250" y="36" width="650" height="232" fill="url(#minor)"/>
 
-  <!-- sidebar -->
-  <rect x="0" y="36" width="250" height="214" fill="#0f131b"/>
-  <line x1="250" y1="36" x2="250" y2="250" stroke="#1e2533"/>
-  <text x="16" y="60" fill="#d3dae6" font-weight="700">shop</text><text x="58" y="60" fill="#6f7a8e">~/code/shop</text>
+    <!-- title bar -->
+    <rect width="900" height="36" fill="#0f1828"/>
+    <circle cx="20" cy="18" r="5.5" fill="#2a3c58"/><circle cx="38" cy="18" r="5.5" fill="#2a3c58"/><circle cx="56" cy="18" r="5.5" fill="#2a3c58"/>
+    <text x="270" y="22" fill="#8394ad"><tspan fill="#c3a6e8" font-weight="600">shop</tspan> / <tspan fill="#e1e9f5" font-weight="500">Fix login redirect loop</tspan> <tspan font-family="'IBM Plex Mono', Menlo, monospace" font-size="11">~/code/shop</tspan></text>
+    <line x1="0" y1="36.5" x2="900" y2="36.5" stroke="#1c2a40"/>
 
-  <rect x="8" y="70" width="234" height="40" rx="6" fill="#161c27"/>
-  <circle cx="22" cy="84" r="4" fill="#8fbf8f"><animate attributeName="r" values="4;5.5;4" dur="1s" repeatCount="indefinite"/></circle>
-  <text x="34" y="88" fill="#f0f2f5">Fix login redirect loop</text><text x="214" y="88" fill="#d4977a">CC</text>
-  <text x="34" y="103" fill="#6f7a8e">claude code</text>
+    <!-- sidebar -->
+    <rect x="0" y="37" width="250" height="231" fill="#0f1828"/>
+    <line x1="250.5" y1="37" x2="250.5" y2="268" stroke="#1c2a40"/>
+    <g transform="translate(16 50) scale(.18)" fill="none" stroke="#8cc8f0" stroke-width="7" stroke-linecap="round">
+      <circle cx="50" cy="50" r="40"/><circle cx="50" cy="50" r="16" fill="#0f1828"/>
+      <circle cx="78.3" cy="21.7" r="5" fill="#eba582" stroke="#0f1828" stroke-width="13"/>
+    </g>
+    <text x="42" y="64" fill="#e1e9f5" font-family="'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif" font-weight="600" font-size="13" letter-spacing="3">HOUSTON</text>
+    <text x="134" y="64" fill="#8394ad" font-family="'IBM Plex Mono', Menlo, monospace" font-size="9" letter-spacing="1.4">MISSION CTL</text>
+    <line x1="0" y1="78.5" x2="250" y2="78.5" stroke="#1c2a40"/>
 
-  <circle cx="22" cy="128" r="4" fill="#d9b36c"><animate attributeName="opacity" values="1;.25;1" dur="1.2s" repeatCount="indefinite"/></circle>
-  <text x="34" y="132" fill="#d3dae6">Add Stripe webhooks</text><text x="214" y="132" fill="#d4977a">CC</text>
-  <text x="34" y="147" fill="#6f7a8e">claude code</text>
+    <rect x="12" y="90" width="8" height="8" rx="2" fill="#c3a6e8" fill-opacity=".35" stroke="#c3a6e8" stroke-width="1.4"/>
+    <text x="28" y="98" fill="#e1e9f5" font-weight="600">shop</text>
+    <text x="236" y="98" fill="#f3c86f" font-family="'IBM Plex Mono', Menlo, monospace" font-size="10" text-anchor="end">+2 ~5 ?1</text>
 
-  <circle cx="22" cy="172" r="4" fill="#6fa8dc"/>
-  <text x="34" y="176" fill="#d3dae6">tty-01</text><text x="214" y="176" fill="#6fa8dc">SH</text>
-  <text x="34" y="191" fill="#6f7a8e">⟫ npm run dev</text>
+    <rect x="22" y="108" width="220" height="40" rx="4" fill="#8cc8f0" fill-opacity=".07" stroke="#2a3c58"/>
+    <g transform="translate(38 121)">
+      <circle r="5.5" fill="none" stroke="#8fd8b4" stroke-opacity=".45" stroke-width="1.3"/><path d="M8 5.3v5.4M5.3 8h5.4M6.1 6.1l3.8 3.8M9.9 6.1l-3.8 3.8" transform="translate(-8 -8)" fill="none" stroke="#eba582" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+      <g><animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="2.4s" repeatCount="indefinite"/><circle cy="-5.5" r="2.2" fill="#8fd8b4" stroke="#121e31" stroke-width="1.6"/></g>
+    </g>
+    <text x="54" y="125" fill="#e1e9f5" font-weight="500">Fix login redirect loop</text>
+    <text x="54" y="141" fill="#8394ad" font-size="11">working · $0.42 · ctx 38%</text>
+    <text x="234" y="125" fill="#8394ad" font-family="'IBM Plex Mono', Menlo, monospace" font-size="10" text-anchor="end">⌘1</text>
 
-  <line x1="8" y1="210" x2="242" y2="210" stroke="#1e2533"/>
-  <text x="16" y="232" fill="#8fbf8f">1 working</text><text x="96" y="232" fill="#d9b36c">1 waiting</text><text x="176" y="232" fill="#6f7a8e">1 idle</text>
+    <g transform="translate(38 165)">
+      <circle r="5.5" fill="none" stroke="#f3c86f" stroke-opacity=".5" stroke-width="1.3"/><path d="M8 5.3v5.4M5.3 8h5.4M6.1 6.1l3.8 3.8M9.9 6.1l-3.8 3.8" transform="translate(-8 -8)" fill="none" stroke="#eba582" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cy="-5.5" r="2.2" fill="#f3c86f" stroke="#0f1828" stroke-width="1.6"><animate attributeName="r" values="2.2;3.2;2.2" dur="1.2s" calcMode="spline" keySplines=".45 0 .55 1;.45 0 .55 1" repeatCount="indefinite"/></circle>
+    </g>
+    <text x="54" y="169" fill="#e1e9f5" font-weight="500">Add Stripe webhooks</text>
+    <text x="54" y="185" fill="#f3c86f" font-size="11">Should I also handle refunds?</text>
+    <text x="234" y="169" fill="#8394ad" font-family="'IBM Plex Mono', Menlo, monospace" font-size="10" text-anchor="end">⌘2</text>
 
-  <!-- pane -->
-  <text x="270" y="62" fill="#6f7a8e">⏺ Read src/auth/session.ts</text>
-  <text x="270" y="82" fill="#6f7a8e">⏺ The redirect fires before the cookie is set, so the guard</text>
-  <text x="270" y="98" fill="#6f7a8e">  sees an anonymous user and bounces back to /login.</text>
-  <text x="270" y="122" fill="#6f7a8e">⏺ Update <tspan fill="#d3dae6">src/auth/middleware.ts</tspan></text>
-  <text x="290" y="140" fill="#d77a7a">-  if (!user) return redirect("/login")</text>
-  <text x="290" y="156" fill="#8fbf8f">+  if (!user &amp;&amp; !isAuthRoute(req)) return redirect("/login")</text>
+    <g transform="translate(38 207)">
+      <circle r="5.5" fill="none" stroke="#8394ad" stroke-opacity=".6" stroke-width="1.3"/><path d="M6.4 5.7l2.3 2.3-2.3 2.3" transform="translate(-8 -8)" fill="none" stroke="#8cc8f0" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="3.9" cy="-3.9" r="2.2" fill="#8394ad" stroke="#0f1828" stroke-width="1.6" paint-order="stroke"/>
+    </g>
+    <text x="54" y="211" fill="#e1e9f5" font-weight="500">dev server</text>
+    <text x="54" y="227" fill="#8394ad" font-size="11" font-family="'IBM Plex Mono', Menlo, monospace">⟫ npm run dev</text>
+    <text x="234" y="211" fill="#8394ad" font-family="'IBM Plex Mono', Menlo, monospace" font-size="10" text-anchor="end">⌘3</text>
 
-  <text x="270" y="186" fill="#d4977a">✻ <tspan fill="#d4977a">Orbiting…</tspan>
-    <animate attributeName="opacity" values="1;.4;1" dur="1.4s" repeatCount="indefinite"/>
-  </text>
-  <text x="380" y="186" fill="#6f7a8e">(esc to interrupt)</text>
+    <line x1="0" y1="242.5" x2="250" y2="242.5" stroke="#1c2a40"/>
+    <text x="16" y="259" fill="#8394ad" font-family="'IBM Plex Mono', Menlo, monospace" font-size="10.5">1 working   1 waiting   1 standby</text>
 
-  <line x1="250" y1="210" x2="900" y2="210" stroke="#1e2533"/>
-  <text x="270" y="232" fill="#8fbf8f">Working</text>
-  <text x="340" y="232" fill="#6f7a8e">~/code/shop   SID 3f9a1c2e</text>
-  <text x="884" y="232" fill="#6f7a8e" text-anchor="end">T+00:04:51</text>
+    <!-- pane -->
+    <g font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="12">
+      <text x="270" y="64" fill="#8394ad">⏺ Read src/auth/session.ts</text>
+      <text x="270" y="86" fill="#8394ad">⏺ The redirect fires before the cookie is set, so the guard</text>
+      <text x="270" y="102" fill="#8394ad">  sees an anonymous user and bounces back to /login.</text>
+      <text x="270" y="126" fill="#8394ad">⏺ Update <tspan fill="#e1e9f5">src/auth/middleware.ts</tspan></text>
+      <text x="290" y="146" fill="#f08a83">-  if (!user) return redirect("/login")</text>
+      <text x="290" y="164" fill="#8fd8b4">+  if (!user &amp;&amp; !isAuthRoute(req)) return redirect("/login")</text>
+      <text x="270" y="196" fill="#eba582">✻ Orbiting… <tspan fill="#8394ad">(esc to interrupt)</tspan></text>
+    </g>
+
+    <rect x="251" y="242" width="649" height="26" fill="#0f1828"/>
+    <line x1="251" y1="242.5" x2="900" y2="242.5" stroke="#1c2a40"/>
+    <g font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="10.5">
+      <text x="266" y="259" fill="#8fd8b4">Working</text>
+      <text x="330" y="259" fill="#8394ad">~/code/shop   SID 3f9a1c2e</text>
+      <text x="530" y="259" fill="#e1e9f5">$0.42 · ctx 38%</text>
+      <text x="884" y="259" fill="#8394ad" text-anchor="end">T+00:04:51</text>
+    </g>
+  </g>
 </svg>
