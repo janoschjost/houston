@@ -16,9 +16,12 @@
   *        .            ·        .          *          ·
 ```
 
-**Houston** is a native desktop app for running many [Claude Code](https://claude.com/claude-code) sessions
-and shells side by side, grouped by project. Every agent gets its own terminal, a live status light, and
-a name taken from what it's actually working on. When an agent finishes or needs you, Houston tells you.
+**Houston** is mission control for your [Claude Code](https://claude.com/claude-code) fleet. It's a native macOS
+app where every agent and shell gets its own terminal, grouped by project, each with a live status light
+and a callsign taken from whatever it's working on.
+
+Launch a few agents with a brief, let them fly, and stop babysitting tabs. Houston keeps an eye on the
+telemetry and calls you back when an agent lands or needs a decision.
 
 <p align="center">
   <img src=".github/assets/console.svg" alt="Houston window: sidebar with sessions, Claude Code pane" width="100%">
@@ -41,6 +44,8 @@ a name taken from what it's actually working on. When an agent finishes or needs
 | 💵 **Session usage** | Each Claude session shows its cost and context use, taken from Claude Code's statusline. |
 | 🧾 **Changes** | Projects with uncommitted work show a `+2 ~5 ?1` badge; click it (or `⌘D`) for a file-by-file diff. |
 | 🔎 **Find & palette** | `⌘F` searches a terminal's scrollback; `⌘P` jumps to any session, project action or command. |
+| 🔑 **Alias launchpad** | `⌘⇧P` lists the aliases in your `.zshrc`. Pick one to open it in a fresh shell (handy for `ssh` hops), or add, edit and delete aliases without leaving the app. |
+| 🎨 **Mission patches** | Each project gets its own colour, used in the sidebar, the pane header, the diff panel and the palette. Fold projects you're not working on. |
 | 🖱️ **Project actions** | Right-click a project to open it in your editor or Finder, run an npm script, or open a pull request. |
 
 ## Controls
@@ -59,12 +64,18 @@ a name taken from what it's actually working on. When an agent finishes or needs
 
 ## Launch sequence
 
+Grab the latest `.dmg` from [Releases](https://github.com/janoschjost/houston/releases), or build it yourself:
+
 ```text
 T-3  ▸ prerequisites   macOS · Node 18+ · Rust (stable) · Claude Code CLI on your PATH
 T-2  ▸ fuel up         npm install
 T-1  ▸ ignition        npm run tauri dev
-T-0  ▸ liftoff 🚀       npm run tauri build   →  src-tauri/target/release/bundle/macos/Houston.app
+T-0  ▸ liftoff 🚀       npm run tauri build   →  src-tauri/target/release/bundle/{macos,dmg}/
 ```
+
+To cut a release, run `scripts/release.sh 0.2.0`. It bumps the version, tags and pushes, and the
+[release workflow](.github/workflows/release.yml) builds a universal `.dmg` into a draft GitHub release.
+Builds are signed and notarized when the Apple secrets are set, and unsigned otherwise.
 
 ## Under the hood
 
@@ -73,12 +84,16 @@ T-0  ▸ liftoff 🚀       npm run tauri build   →  src-tauri/target/release/
  │  src/          TypeScript UI (Vite, xterm.js + WebGL)       │
  │   ├ app.ts       sidebar, layout, shortcuts, persistence    │
  │   ├ session.ts   one pane: PTY, status tracking, naming     │
- │   └ input.ts     Warp-style command editor + completion     │
+ │   ├ input.ts     Warp-style command editor + completion     │
+ │   ├ palette.ts   command palette and mission briefs         │
+ │   ├ aliases.ts   .zshrc alias launchpad                     │
+ │   └ diff.ts      uncommitted changes panel                  │
  │                         ▲  Tauri IPC  ▼                     │
  │  src-tauri/    Rust backend                                 │
  │   ├ pty.rs       spawns and streams pseudo-terminals        │
  │   ├ shell.rs     zsh integration (OSC 6973), git, state     │
- │   └ limits.rs    statusline capture for plan limits         │
+ │   ├ aliases.rs   reads and edits aliases in .zshrc          │
+ │   └ limits.rs    statusline capture for limits and usage    │
  └─────────────────────────────────────────────────────────────┘
 ```
 
