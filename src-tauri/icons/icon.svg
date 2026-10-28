@@ -1,51 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Source for the app icons: regenerate with `npx tauri icon src-tauri/icons/icon.svg`. -->
+  <!-- Source for the app icons: regenerate with `npx tauri icon src-tauri/icons/icon.svg`.
+       The mark from src/icons.ts at 7.5× (ring r40 → 300), drawn in ink on drafting film. -->
   <defs>
     <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
-    <clipPath id="globe"><circle cx="512" cy="512" r="165"/></clipPath>
-    <radialGradient id="bg" cx="50%" cy="45%" r="65%"><stop offset="0" stop-color="#132643"/><stop offset=".65" stop-color="#0d1a2f"/><stop offset="1" stop-color="#0a1322"/></radialGradient>
-    <radialGradient id="glow" r="50%"><stop offset="0" stop-color="#4fb3ff" stop-opacity=".28"/><stop offset="1" stop-color="#4fb3ff" stop-opacity="0"/></radialGradient>
-    <radialGradient id="body" cx="34%" cy="28%" r="80%"><stop offset="0" stop-color="#b8ecff"/><stop offset=".35" stop-color="#5bb4e6"/><stop offset=".7" stop-color="#4868c4"/><stop offset="1" stop-color="#33296e"/></radialGradient>
-    <radialGradient id="moon" cx="34%" cy="30%" r="75%"><stop offset="0" stop-color="#ffd8c2"/><stop offset=".6" stop-color="#e5917a"/><stop offset="1" stop-color="#94504a"/></radialGradient>
-    <linearGradient id="ring" x1="212" x2="812" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#b79cf5"/><stop offset=".5" stop-color="#f29bb8"/><stop offset="1" stop-color="#f5c983"/></linearGradient>
-    <linearGradient id="flame" x1="0" x2="1"><stop offset="0" stop-color="#f5c983" stop-opacity="0"/><stop offset=".6" stop-color="#f5c983"/><stop offset="1" stop-color="#fff1c9"/></linearGradient>
-    <pattern id="grid" width="128" height="128" patternUnits="userSpaceOnUse"><path d="M128 0 H0 V128" fill="none" stroke="#7fc8ff" stroke-opacity=".08" stroke-width="2"/></pattern>
+    <radialGradient id="film" cx="50%" cy="42%" r="70%"><stop offset="0" stop-color="#16294a"/><stop offset=".7" stop-color="#0d1a30"/><stop offset="1" stop-color="#0a1426"/></radialGradient>
+    <pattern id="minor" width="34.33" height="34.33" patternUnits="userSpaceOnUse" x="100" y="100"><path d="M34.33 0H0V34.33" fill="none" stroke="#8cc8f0" stroke-opacity=".05" stroke-width="2"/></pattern>
+    <pattern id="major" width="103" height="103" patternUnits="userSpaceOnUse" x="100" y="100"><path d="M103 0H0V103" fill="none" stroke="#8cc8f0" stroke-opacity=".1" stroke-width="2"/></pattern>
   </defs>
 
   <g clip-path="url(#tile)">
-    <rect width="1024" height="1024" fill="url(#bg)"/>
-    <rect width="1024" height="1024" fill="url(#grid)"/>
+    <rect width="1024" height="1024" fill="url(#film)"/>
+    <rect width="1024" height="1024" fill="url(#minor)"/>
+    <rect width="1024" height="1024" fill="url(#major)"/>
+    <!-- radar sweep -->
+    <path d="M512 512 L512 212 A300 300 0 0 1 771.8 362 Z" fill="#8cc8f0" fill-opacity=".1"/>
+  </g>
 
-    <!-- Blueprint construction: compass ring and dashed orbit -->
-    <g fill="none" stroke="#7fd0ff">
-      <circle cx="512" cy="512" r="372" stroke-opacity=".18" stroke-width="2"/>
-      <circle cx="512" cy="512" r="384" stroke-opacity=".25" stroke-width="12" stroke-dasharray="2 38.21"/>
-    </g>
-
-    <circle cx="512" cy="512" r="300" fill="url(#glow)"/>
-
-    <g transform="rotate(-14 512 512)">
-      <path d="M212 512 A300 78 0 0 1 812 512" fill="none" stroke="url(#ring)" stroke-width="16" stroke-opacity=".45" stroke-linecap="round"/>
-
-      <!-- Planet with a light lat/long wireframe -->
-      <circle cx="512" cy="512" r="165" fill="url(#body)"/>
-      <g clip-path="url(#globe)" fill="none" stroke="#e0f6ff" stroke-opacity=".22" stroke-width="3">
-        <ellipse cx="512" cy="512" rx="90" ry="165"/>
-        <ellipse cx="512" cy="512" rx="165" ry="34"/>
-      </g>
-
-      <path d="M812 512 A300 78 0 0 1 212 512" fill="none" stroke="url(#ring)" stroke-width="16" stroke-linecap="round"/>
-    </g>
-
-    <circle cx="262" cy="300" r="36" fill="url(#moon)"/>
-    <circle cx="262" cy="300" r="54" fill="none" stroke="#ffb39c" stroke-opacity=".35" stroke-width="2" stroke-dasharray="5 9"/>
-
-    <!-- Rocket -->
-    <g transform="translate(756 276) rotate(-28)">
-      <path d="M-64 0 L-6 -12 L-6 12 Z" fill="url(#flame)"/>
-      <path d="M-6 -20 L50 -20 Q88 0 50 20 L-6 20 Z" fill="#eef3fb"/>
-      <circle cx="42" cy="0" r="8" fill="#5bb4e6"/>
-      <path d="M0 -20 L-20 -42 L22 -20 Z M0 20 L-20 42 L22 20 Z" fill="#ee8f7c"/>
+  <g fill="none" stroke="#8cc8f0" stroke-width="26" stroke-linecap="round">
+    <circle cx="512" cy="512" r="300"/>
+    <path d="M512 167v75M512 782v75M167 512h75M782 512h75" stroke-opacity=".55" stroke-width="22"/>
+    <circle cx="512" cy="512" r="120" fill="#0f1d36"/>
+    <g transform="rotate(-14 512 512)" stroke-opacity=".38" stroke-width="16">
+      <ellipse cx="512" cy="512" rx="120" ry="34"/>
+      <ellipse cx="512" cy="512" rx="49" ry="120"/>
     </g>
   </g>
+  <!-- satellite at 45°, its halo cutting the ring -->
+  <circle cx="724.1" cy="299.9" r="40" fill="#eba582" stroke="#12243f" stroke-width="44" paint-order="stroke"/>
 </svg>
