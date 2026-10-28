@@ -33,6 +33,15 @@ export interface RateLimits {
   seven_day?: LimitWindow;
 }
 
+/** Usage Claude Code last reported for one session; fields are null until it has a value. */
+export interface SessionStats {
+  cost_usd: number | null;
+  lines_added: number | null;
+  lines_removed: number | null;
+  context_percent: number | null;
+  model: string | null;
+}
+
 export interface PathItem {
   insert: string;
   label: string;
@@ -46,6 +55,13 @@ export interface GitStatus {
   staged: number;
   modified: number;
   untracked: number;
+}
+
+/** An `alias` line from the user's .zshrc; non-editable ones expand `$` or backticks and are shown as written. */
+export interface Alias {
+  name: string;
+  command: string;
+  editable: boolean;
 }
 
 export const api = {
@@ -62,10 +78,16 @@ export const api = {
     invoke<PathItem[]>("complete_path", { cwd, word, dirsOnly }),
   gitRefs: (cwd: string) => invoke<string[]>("git_refs", { cwd }),
   gitStatus: (cwd: string) => invoke<GitStatus | null>("git_status", { cwd }),
+  gitDiff: (cwd: string) => invoke<string>("git_diff", { cwd }),
+  launchDetached: (cwd: string, command: string) => invoke<void>("launch_detached", { cwd, command }),
   npmScripts: (cwd: string) => invoke<string[]>("npm_scripts", { cwd }),
   claudeSessionExists: (id: string) => invoke<boolean>("claude_session_exists", { id }),
   claudeStatusLine: () => invoke<string>("claude_status_line"),
   claudeLimits: () => invoke<RateLimits | null>("claude_limits"),
+  claudeSessionStats: (ids: string[]) => invoke<Record<string, SessionStats>>("claude_session_stats", { ids }),
   loadState: <T>() => invoke<T | null>("load_state"),
   saveState: (state: unknown) => invoke<void>("save_state", { state }),
+  listAliases: () => invoke<Alias[]>("list_aliases"),
+  saveAlias: (original: string | null, name: string, command: string) => invoke<void>("save_alias", { original, name, command }),
+  deleteAlias: (name: string) => invoke<void>("delete_alias", { name }),
 };

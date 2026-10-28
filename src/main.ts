@@ -10,9 +10,13 @@ async function boot() {
   await Promise.all([document.fonts.load('13px "JetBrains Mono"'), document.fonts.load('bold 13px "JetBrains Mono"')]);
   const shell = await api.shellInfo();
   await new App(shell).start();
-  document.getElementById("boot")?.remove();
+  const bootEl = document.getElementById("boot");
+  bootEl?.classList.add("done");
+  bootEl?.addEventListener("transitionend", () => bootEl.remove(), { once: true });
 }
 
 boot().catch((err) => {
-  document.querySelector("#boot pre")!.textContent = `boot failure: ${err}`;
+  const status = document.querySelector(".boot-status")!;
+  status.classList.add("failed");
+  status.textContent = `Boot failure: ${err}`;
 });

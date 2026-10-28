@@ -37,6 +37,13 @@ export class Completer {
     this.history = info.history;
   }
 
+  /** Makes a name defined after startup (e.g. a new alias) highlight and complete as a command. */
+  addCommand(name: string) {
+    if (this.commandSet.has(name)) return;
+    this.commandSet.add(name);
+    this.commands.push(name);
+  }
+
   isCommand = (word: string): boolean | undefined => {
     if (!this.commandSet.size) return undefined;
     return this.commandSet.has(word) || word.includes("/") || word.startsWith("$");

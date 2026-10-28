@@ -4,18 +4,49 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Houston</title>
+    <!-- Inline so the boot screen is styled before the bundled stylesheet loads. -->
+    <style>
+      html, body { margin: 0; background: #0b0e14; }
+      #boot {
+        position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
+        background: radial-gradient(ellipse at 50% 42%, #141b29, #0b0e14 70%);
+        color: #6f7a8e; font: 11px/1.4 "JetBrains Mono", Menlo, monospace;
+        transition: opacity .35s ease;
+      }
+      #boot.done { opacity: 0; pointer-events: none; }
+      .boot-card { display: grid; justify-items: center; gap: 14px; }
+      .boot-planet { overflow: visible; }
+      .boot-orbit { transform-origin: 60px 60px; animation: boot-spin 3.2s linear infinite; }
+      .boot-title { color: #f0f2f5; font-size: 22px; font-weight: 700; letter-spacing: .5em; margin-right: -.5em; }
+      .boot-status { letter-spacing: .2em; text-transform: uppercase; font-size: 10px; }
+      .boot-status.failed { color: #d77a7a; text-transform: none; letter-spacing: 0; max-width: 60ch; text-align: center; }
+      .boot-dots i { font-style: normal; animation: boot-dot 1.2s infinite; }
+      .boot-dots i:nth-child(2) { animation-delay: .2s; }
+      .boot-dots i:nth-child(3) { animation-delay: .4s; }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+      @keyframes boot-dot { 0%, 100% { opacity: .2; } 40% { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { .boot-orbit, .boot-dots i { animation: none; } }
+    </style>
   </head>
   <body>
     <div id="app">
       <aside id="sidebar">
         <div class="brand" data-tauri-drag-region>
-          <span class="brand-mark" data-tauri-drag-region>◉</span>
-          <span class="brand-name" data-tauri-drag-region>Houston</span>
-          <span class="brand-sub" data-tauri-drag-region>MISSION CONTROL</span>
+          <svg class="brand-mark" viewBox="0 0 20 20" aria-hidden="true" data-tauri-drag-region>
+            <g transform="rotate(-14 10 10)">
+              <circle cx="10" cy="10" r="4.6"/>
+              <path d="M 5.6 8.7 A 7.6 2.2 0 1 0 14.4 8.7"/>
+            </g>
+            <circle class="brand-moon" cx="16.2" cy="4.2" r="1.3"/>
+          </svg>
+          <span class="brand-name" data-tauri-drag-region>HOUSTON</span>
+          <span class="brand-sub" data-tauri-drag-region>mission control</span>
+          <span class="brand-link" title="Online"></span>
         </div>
         <div id="projects"></div>
         <div class="sidebar-foot">
           <button id="add-project">+ Add project <kbd>⌘O</kbd></button>
+          <button id="open-aliases">⌁ Aliases <kbd>⌘P</kbd></button>
           <div id="telemetry"></div>
           <div id="limits"></div>
         </div>
@@ -24,7 +55,8 @@
         <header id="topbar" data-tauri-drag-region>
           <div id="crumbs" data-tauri-drag-region></div>
           <div class="actions">
-            <button id="new-claude" class="btn-claude">✦ Claude <kbd>⌘N</kbd></button>
+            <button id="waiting-pill" class="hidden" title="Jump to next waiting session (⌘J)"></button>
+            <button id="new-claude" class="btn-claude">✽ Claude <kbd>⌘N</kbd></button>
             <button id="new-shell">›_ Shell <kbd>⌘T</kbd></button>
             <div class="seg">
               <button data-layout="focus">Focus</button>
@@ -32,10 +64,108 @@
             </div>
           </div>
         </header>
-        <section id="stage" class="stage"></section>
+        <div class="stage-wrap">
+          <!-- Blueprint backdrop behind the panes: grid, drawings and a few slow animations. -->
+          <div id="backdrop" aria-hidden="true">
+            <div class="stars"><i class="shooting"></i></div>
+            <div class="bp-frame"></div>
+            <svg class="bp-art bp-radar" viewBox="0 0 440 470">
+              <circle cx="220" cy="220" r="150" class="ticks"/>
+              <circle cx="220" cy="220" r="140"/>
+              <circle cx="220" cy="220" r="95" class="dash"/>
+              <circle cx="220" cy="220" r="48" class="faint"/>
+              <path d="M60 220 H380 M220 60 V380" class="faint"/>
+              <g class="bp-sweep"><path d="M220 220 V80 A140 140 0 0 1 319 121 Z" class="wedge"/><path d="M220 220 L319 121"/></g>
+              <circle cx="290" cy="160" r="3" class="fill bp-blip"/>
+              <circle cx="160" cy="300" r="2.5" class="fill bp-blip" style="animation-delay: -3s"/>
+              <circle cx="250" cy="320" r="2" class="fill bp-blip" style="animation-delay: -6s"/>
+              <text x="220" y="58" text-anchor="middle">000</text>
+              <text x="384" y="224">090</text>
+              <text x="220" y="394" text-anchor="middle">180</text>
+              <text x="56" y="224" text-anchor="end">270</text>
+              <text x="40" y="450">FIG. 1 · S-BAND TRACKING</text>
+            </svg>
+            <svg class="bp-art bp-orbit" viewBox="0 0 640 520">
+              <text x="40" y="24">FIG. 2 · HOHMANN TRANSFER</text>
+              <path d="M40 280 H600 M300 30 V520" class="faint dash"/>
+              <circle cx="300" cy="280" r="54" class="body"/>
+              <ellipse cx="300" cy="280" rx="54" ry="18" class="faint"/>
+              <ellipse cx="300" cy="280" rx="20" ry="54" class="faint"/>
+              <circle cx="300" cy="280" r="100"/>
+              <circle cx="300" cy="280" r="230" class="dash"/>
+              <path d="M400 280 A165 152 0 0 0 70 280" class="faint dash"/>
+              <path d="M400 280 A165 152 0 0 0 70 280" class="bp-trace" pathLength="100"/>
+              <circle cx="400" cy="280" r="3" class="fill"/>
+              <circle cx="70" cy="280" r="3" class="fill"/>
+              <g><animateMotion dur="20s" repeatCount="indefinite" rotate="auto" path="M400 280 A100 100 0 1 0 200 280 A100 100 0 1 0 400 280"/><path d="M0 -7 V7"/><rect x="-2.5" y="-2.5" width="5" height="5" class="fill"/></g>
+              <g><animateMotion dur="70s" repeatCount="indefinite" path="M530 280 A230 230 0 1 0 70 280 A230 230 0 1 0 530 280"/><circle r="3.5" class="fill"/></g>
+              <text x="410" y="306">ΔV1 +2.46 KM/S</text>
+              <text x="80" y="306">ΔV2 +1.47 KM/S</text>
+              <text x="380" y="200">LEO 405 KM</text>
+              <text x="180" y="118">TRANSFER</text>
+              <text x="470" y="100">GEO 35 786 KM</text>
+            </svg>
+            <svg class="bp-art bp-rocket" viewBox="0 0 300 900">
+              <path d="M110 10 V880" class="center faint"/>
+              <path d="M78 190 C78 120 96 80 110 56 C124 80 142 120 142 190"/>
+              <rect x="78" y="190" width="64" height="540"/>
+              <path d="M78 340 H142 M78 360 H142 M78 500 H142" class="faint"/>
+              <path d="M82 360 L102 340 M98 360 L118 340 M114 360 L134 340 M130 360 L142 348" class="faint"/>
+              <rect x="86" y="370" width="48" height="120" rx="10" class="dash"/>
+              <rect x="86" y="512" width="48" height="110" rx="10" class="dash"/>
+              <rect x="86" y="630" width="48" height="90" rx="10" class="dash"/>
+              <path d="M78 640 L46 750 L78 730 M142 640 L174 750 L142 730"/>
+              <path d="M90 730 L84 780 H106 L100 730 M120 730 L114 780 H136 L130 730"/>
+              <path d="M20 56 V780 M12 56 H70 M12 780 H80 M78 800 V830 M142 800 V830 M78 820 H142" class="faint"/>
+              <path d="M16 66 L20 56 L24 66 M16 770 L20 780 L24 770"/>
+              <text transform="translate(12 418) rotate(-90)" text-anchor="middle">70.0 M</text>
+              <text x="110" y="850" text-anchor="middle">Ø 3.7 M</text>
+              <path d="M126 120 L170 100 H200 M142 270 H200 M142 430 H200 M142 567 H200 M142 675 H200 M136 770 L170 790 H200" class="faint"/>
+              <circle cx="126" cy="120" r="2" class="fill"/>
+              <circle cx="142" cy="270" r="2" class="fill"/>
+              <circle cx="142" cy="430" r="2" class="fill"/>
+              <circle cx="142" cy="567" r="2.5" class="fill"/>
+              <circle cx="142" cy="675" r="2" class="fill"/>
+              <circle cx="136" cy="770" r="2" class="fill"/>
+              <text x="206" y="104">FAIRING</text>
+              <text x="206" y="274">PAYLOAD</text>
+              <text x="206" y="434">STAGE 2</text>
+              <text x="206" y="571">LOX</text>
+              <text x="206" y="679">RP-1</text>
+              <text x="206" y="794">ENGINES</text>
+              <text x="10" y="892">DWG HSTN-07 · REV C</text>
+            </svg>
+          </div>
+          <section id="stage" class="stage"></section>
+        </div>
       </main>
     </div>
-    <div id="boot"><pre>Establishing uplink…</pre></div>
+    <div id="boot">
+      <div class="boot-card">
+        <svg class="boot-planet" width="120" height="120" viewBox="0 0 120 120" aria-hidden="true">
+          <defs>
+            <radialGradient id="bt-body" cx="34%" cy="28%" r="80%"><stop offset="0" stop-color="#b8ecff"/><stop offset=".35" stop-color="#5bb4e6"/><stop offset=".7" stop-color="#4868c4"/><stop offset="1" stop-color="#33296e"/></radialGradient>
+            <radialGradient id="bt-glow" r="50%"><stop offset="0" stop-color="#4fb3ff" stop-opacity=".35"/><stop offset="1" stop-color="#4fb3ff" stop-opacity="0"/></radialGradient>
+            <linearGradient id="bt-ring" x1="22" x2="98" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#b79cf5"/><stop offset=".5" stop-color="#f29bb8"/><stop offset="1" stop-color="#f5c983"/></linearGradient>
+            <clipPath id="bt-globe"><circle cx="60" cy="60" r="24"/></clipPath>
+          </defs>
+          <circle cx="60" cy="60" r="58" fill="url(#bt-glow)"/>
+          <circle cx="60" cy="60" r="54" fill="none" stroke="#7fd0ff" stroke-opacity=".25" stroke-width="3" stroke-dasharray=".6 8.82"/>
+          <circle cx="60" cy="60" r="46" fill="none" stroke="#7fd0ff" stroke-opacity=".2" stroke-dasharray="2 5"/>
+          <g transform="rotate(-14 60 60)">
+            <path d="M 22 60 a 38 10 0 0 1 76 0" fill="none" stroke="url(#bt-ring)" stroke-width="2.5" stroke-opacity=".45" stroke-linecap="round"/>
+            <circle cx="60" cy="60" r="24" fill="url(#bt-body)"/>
+            <g clip-path="url(#bt-globe)" fill="none" stroke="#e0f6ff" stroke-opacity=".22">
+              <ellipse cx="60" cy="60" rx="13" ry="24"/><ellipse cx="60" cy="60" rx="24" ry="5"/>
+            </g>
+            <path d="M 98 60 a 38 10 0 0 1 -76 0" fill="none" stroke="url(#bt-ring)" stroke-width="2.5" stroke-linecap="round"/>
+          </g>
+          <g class="boot-orbit"><circle cx="60" cy="14" r="4.5" fill="#ee8f7c"/></g>
+        </svg>
+        <div class="boot-title">HOUSTON</div>
+        <div class="boot-status">Establishing uplink<span class="boot-dots"><i>.</i><i>.</i><i>.</i></span></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

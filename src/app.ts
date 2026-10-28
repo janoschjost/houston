@@ -1,9 +1,10 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { api, type LimitWindow, type RateLimits, type ShellInfo } from "./api";
+import { AliasPalette } from "./aliases";
+import { api, type Alias, type LimitWindow, type RateLimits, type ShellInfo } from "./api";
 import { Completer } from "./completion";
-import { Session, shortPath, type Kind, type ProjectRec, type SessionRec } from "./session";
+import { STATUS_LABEL, Session, nextProjectColor, shortPath, type Kind, type ProjectRec, type SessionRec } from "./session";
 
 type Layout = "focus" | "grid";
 
@@ -13,6 +14,7 @@ interface Persisted {
   sessions: SessionRec[];
   selectedId?: string;
   layout: Layout;
+  sidebarHidden?: boolean;
 }
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
@@ -30,6 +32,22 @@ function countdown(ms: number) {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h${String(m % 60).padStart(2, "0")}m`;
   return `${Math.floor(h / 24)}d${h % 24}h`;
+}
+
+/** Approximate xterm cell size at 13px JetBrains Mono, used to size grid panes. */
+const CELL_W = 7.8;
+const CELL_H = 15;
+
+/** Column count that lets every pane show the largest share of an 80×24 terminal. */
+function gridColumns(n: number, width: number, height: number) {
+  let best = 1;
+  let bestScore = -1;
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols);
+    const score = Math.min(width / cols / (80 * CELL_W), height / rows / (24 * CELL_H));
+    if (score > bestScore) [best, bestScore] = [cols, score];
+  }
+  return best;
 }
 
 const FUEL_CELLS = 20;
@@ -70,6 +88,41 @@ function renderLimits(limits: RateLimits | null) {
     <div class="l-scale"><span>E</span><span>½</span><span>F</span></div>`;
 }
 
+/** Ringed planet with an orbiting moon and rocket, as in the README banner. */
+const PLANET = `<svg class="planet" viewBox="0 0 360 200" aria-hidden="true">
+  <defs>
+    <radialGradient id="pl-body" cx="34%" cy="28%" r="80%"><stop offset="0" stop-color="#b8ecff"/><stop offset=".35" stop-color="#5bb4e6"/><stop offset=".7" stop-color="#4868c4"/><stop offset="1" stop-color="#33296e"/></radialGradient>
+    <radialGradient id="pl-moon" cx="34%" cy="30%" r="75%"><stop offset="0" stop-color="#ffd8c2"/><stop offset=".6" stop-color="#e5917a"/><stop offset="1" stop-color="#94504a"/></radialGradient>
+    <radialGradient id="pl-glow" r="50%"><stop offset="0" stop-color="#4fb3ff" stop-opacity=".3"/><stop offset="1" stop-color="#4fb3ff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="pl-ring" x1="110" x2="250" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#b79cf5"/><stop offset=".5" stop-color="#f29bb8"/><stop offset="1" stop-color="#f5c983"/></linearGradient>
+    <linearGradient id="pl-flame" x1="0" x2="1"><stop offset="0" stop-color="#f5c983" stop-opacity="0"/><stop offset=".6" stop-color="#f5c983"/><stop offset="1" stop-color="#fff1c9"/></linearGradient>
+    <clipPath id="pl-globe"><circle cx="180" cy="100" r="42"/></clipPath>
+    <path id="pl-orbit" d="M 180 100 m -130 0 a 130 46 -12 1 0 260 0 a 130 46 -12 1 0 -260 0"/>
+  </defs>
+  <circle cx="180" cy="100" r="96" fill="url(#pl-glow)"/>
+  <circle cx="180" cy="100" r="62" fill="none" stroke="#7fd0ff" stroke-opacity=".2" stroke-width="4" stroke-dasharray=".8 9.94"/>
+  <use href="#pl-orbit" fill="none" stroke="#7fd0ff" stroke-opacity=".22" stroke-dasharray="2 6"/>
+  <ellipse cx="180" cy="100" rx="172" ry="64" transform="rotate(-12 180 100)" fill="none" stroke="#7fd0ff" stroke-opacity=".12" stroke-dasharray="1 8"/>
+  <g transform="rotate(-12 180 100)">
+    <path d="M 110 100 a 70 15 0 0 1 140 0" fill="none" stroke="url(#pl-ring)" stroke-width="3" stroke-opacity=".45" stroke-linecap="round"/>
+    <circle cx="180" cy="100" r="42" fill="url(#pl-body)"/>
+    <g clip-path="url(#pl-globe)" fill="none" stroke="#e0f6ff" stroke-opacity=".22">
+      <ellipse cx="180" cy="100" rx="23" ry="42"/><ellipse cx="180" cy="100" rx="42" ry="9"/>
+    </g>
+    <path d="M 250 100 a 70 15 0 0 1 -140 0" fill="none" stroke="url(#pl-ring)" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <circle r="8" fill="url(#pl-moon)"><animateMotion dur="26s" repeatCount="indefinite" path="M 180 100 m -172 0 a 172 64 -12 1 0 344 0 a 172 64 -12 1 0 -344 0"/></circle>
+  <g>
+    <animateMotion dur="12s" repeatCount="indefinite" rotate="auto"><mpath href="#pl-orbit"/></animateMotion>
+    <g transform="translate(-11 0) scale(.8)">
+      <path d="M -20 0 L 0 -4 L 0 4 Z" fill="url(#pl-flame)"><animate attributeName="d" values="M -20 0 L 0 -4 L 0 4 Z;M -28 0 L 0 -4 L 0 4 Z;M -20 0 L 0 -4 L 0 4 Z" dur=".25s" repeatCount="indefinite"/></path>
+      <path d="M 0 -6 L 18 -6 Q 30 0 18 6 L 0 6 Z" fill="#d5d8de"/>
+      <circle cx="15" cy="0" r="2.6" fill="#6fa8dc"/>
+      <path d="M 2 -6 L -4 -12 L 8 -6 Z M 2 6 L -4 12 L 8 6 Z" fill="#d4977a"/>
+    </g>
+  </g>
+</svg>`;
+
 /** Faint flight-dynamics backdrop behind the splash: orbit plot plus corner readouts. */
 const HUD = (projects: number) => `<div class="hud" aria-hidden="true">
   <svg viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid slice">
@@ -97,6 +150,7 @@ export class App {
   /** Project that "new session" targets when nothing is selected in it. */
   private activeProjectId?: string;
   private layout: Layout = "focus";
+  private sidebarHidden = false;
   private completer = new Completer();
   private saveTimer?: number;
   private sidebarKey = "";
@@ -104,25 +158,36 @@ export class App {
   private notifyAllowed = false;
   /** Sidebar re-renders are paused while a session name is being edited in place. */
   private renaming = false;
+  private aliases = new AliasPalette({
+    connect: (alias) => this.newSession("shell", undefined, alias),
+    defined: (name) => this.completer.addCommand(name),
+  });
 
   constructor(private shell: ShellInfo) {
     this.completer.load(shell);
+    document.body.appendChild(this.aliases.el);
   }
 
   async start() {
     const saved = await api.loadState<Persisted>().catch(() => null);
     if (saved) {
-      this.projects = saved.projects;
+      this.projects = [];
+      // Projects saved before colours existed get one in their original order.
+      for (const p of saved.projects) this.projects.push({ ...p, color: p.color ?? nextProjectColor(this.projects) });
       this.layout = saved.layout ?? "focus";
+      this.sidebarHidden = saved.sidebarHidden ?? false;
       for (const rec of saved.sessions) {
         const project = this.projects.find((p) => p.id === rec.projectId);
         // Sessions from before auto-naming still carry their placeholder name.
         if (rec.kind === "claude" && rec.autoName === undefined && /^agent-\d+$/.test(rec.name)) rec.autoName = true;
         if (project) this.sessions.push(this.makeSession(rec, project));
       }
+      this.orderSessions();
       this.selectedId = this.sessions.find((s) => s.rec.id === saved.selectedId)?.rec.id ?? this.sessions[0]?.rec.id;
     }
     this.bindChrome();
+    new ResizeObserver(() => this.layoutGrid()).observe($("#stage"));
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.querySelectorAll<SVGSVGElement>("#backdrop svg").forEach((svg) => svg.pauseAnimations());
     this.renderAll();
     setInterval(() => this.tick(), 400);
     this.pollLimits();
@@ -146,6 +211,12 @@ export class App {
     });
   }
 
+  /** Keeps sessions grouped in sidebar order (by project, then creation), which ⌘1–9, ⌘[ / ⌘] and the grid follow. */
+  private orderSessions() {
+    const rank = (s: Session) => this.projects.indexOf(s.project);
+    this.sessions.sort((a, b) => rank(a) - rank(b));
+  }
+
   private save() {
     clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => {
@@ -155,6 +226,7 @@ export class App {
         sessions: this.sessions.map((s) => s.rec),
         selectedId: this.selectedId,
         layout: this.layout,
+        sidebarHidden: this.sidebarHidden,
       };
       api.saveState(state).catch((e) => console.error("save failed", e));
     }, 300);
@@ -165,7 +237,7 @@ export class App {
     if (typeof path !== "string") return;
     let project = this.projects.find((p) => p.path === path);
     if (!project) {
-      project = { id: crypto.randomUUID(), path, name: path.split("/").filter(Boolean).pop() ?? path };
+      project = { id: crypto.randomUUID(), path, name: path.split("/").filter(Boolean).pop() ?? path, color: nextProjectColor(this.projects) };
       this.projects.push(project);
       this.save();
     }
@@ -174,7 +246,8 @@ export class App {
     return project;
   }
 
-  private async newSession(kind: Kind, projectId?: string) {
+  /** `alias` opens a shell named after it that runs the alias once the shell is ready. */
+  private async newSession(kind: Kind, projectId?: string, alias?: Alias) {
     let project: ProjectRec | undefined =
       this.projects.find((p) => p.id === projectId) ??
       this.selected?.project ??
@@ -187,12 +260,16 @@ export class App {
       id: crypto.randomUUID(),
       projectId: project.id,
       kind,
-      name: kind === "claude" ? "new agent" : `tty-${String(siblings + 1).padStart(2, "0")}`,
+      name: alias?.name ?? (kind === "claude" ? "new agent" : `tty-${String(siblings + 1).padStart(2, "0")}`),
       autoName: kind === "claude" || undefined,
       claudeId: kind === "claude" ? crypto.randomUUID() : undefined,
       createdAt: Date.now(),
     };
-    this.sessions.push(this.makeSession(rec, project));
+    const session = this.makeSession(rec, project);
+    session.startCommand = alias?.name;
+    this.sessions.push(session);
+    this.orderSessions();
+    project.collapsed = false;
     this.select(rec.id);
     this.save();
   }
@@ -211,8 +288,8 @@ export class App {
 
   private async closeSession(s: Session | undefined) {
     if (!s) return;
-    const live = s.status !== "exited" && s.status !== "dormant";
-    if (live && !(await ask(`Terminate ${s.rec.name} in ${s.project.name}?${s.rec.kind === "claude" ? "\n\nThe conversation stays saved in Claude Code." : ""}`, { title: "Houston", kind: "warning", okLabel: "Terminate" }))) {
+    // Idle sessions close without asking; a Claude conversation stays resumable either way.
+    if (s.busy && !(await ask(`Terminate ${s.rec.name} in ${s.project.name}?${s.rec.kind === "claude" ? "\n\nThe conversation stays saved in Claude Code." : ""}`, { title: "Houston", kind: "warning", okLabel: "Terminate" }))) {
       return;
     }
     const index = this.sessions.indexOf(s);
@@ -247,6 +324,36 @@ export class App {
     this.select(this.sessions[(i + delta + this.sessions.length) % this.sessions.length].rec.id);
   }
 
+  /** Selects the next session awaiting input after the current one, wrapping around. */
+  private nextWaiting() {
+    const i = this.sessions.findIndex((s) => s.rec.id === this.selectedId);
+    const order = [...this.sessions.slice(i + 1), ...this.sessions.slice(0, i + 1)];
+    const next = order.find((s) => s.status === "attention");
+    if (next) this.select(next.rec.id);
+  }
+
+  private toggleCollapsed(project: ProjectRec) {
+    project.collapsed = !project.collapsed;
+    this.renderAll();
+    this.save();
+  }
+
+  private setSidebarHidden(hidden: boolean) {
+    this.sidebarHidden = hidden;
+    $("#app").classList.toggle("no-sidebar", hidden);
+    this.save();
+  }
+
+  /** Renames the selected session in place, revealing its sidebar row first. */
+  private renameSelected() {
+    const s = this.selected;
+    if (!s) return;
+    if (this.sidebarHidden) this.setSidebarHidden(false);
+    if (s.project.collapsed) this.toggleCollapsed(s.project);
+    const label = document.querySelector<HTMLElement>(`[data-rename="${s.rec.id}"]`);
+    if (label) this.startRename(label, s);
+  }
+
   private setLayout(layout: Layout) {
     this.layout = layout;
     this.renderAll();
@@ -268,6 +375,9 @@ export class App {
     if (waiting !== this.badge) {
       this.badge = waiting;
       getCurrentWindow().setBadgeCount(waiting || undefined).catch(() => {});
+      const pill = $("#waiting-pill");
+      pill.textContent = `${waiting} waiting`;
+      pill.classList.toggle("hidden", !waiting);
     }
     this.renderSidebar();
     this.renderCrumbs();
@@ -285,7 +395,7 @@ export class App {
   private renderSidebar() {
     const home = this.shell.home;
     const key = JSON.stringify([
-      this.projects.map((p) => p.id),
+      this.projects.map((p) => [p.id, p.collapsed]),
       this.activeProjectId,
       this.selectedId,
       this.sessions.map((s) => [s.rec.name, s.status, s.title, s.cwd, s.runningCommand]),
@@ -293,44 +403,48 @@ export class App {
     if (key === this.sidebarKey || this.renaming) return;
     this.sidebarKey = key;
 
-    let n = 0;
     const html = this.projects
       .map((p) => {
         const mine = this.sessions.filter((s) => s.project.id === p.id);
         const rows = mine
           .map((s) => {
             const index = this.sessions.indexOf(s) + 1;
+            const status = STATUS_LABEL[s.status];
             const sub = s.rec.kind === "claude" ? (!s.rec.autoName && s.title) || "claude code" : s.runningCommand ? `⟫ ${s.runningCommand}` : shortPath(s.cwd, home);
-            n++;
             return `<div class="sess${s.rec.id === this.selectedId ? " sel" : ""}" data-status="${s.status}" data-select="${s.rec.id}">
-              <span class="dot"></span>
+              <span class="dot" role="img" aria-label="${status}" title="${status}"></span>
               <div class="sess-body">
                 <div class="sess-line"><span class="sess-name" data-rename="${s.rec.id}">${escapeHtml(s.rec.name)}</span><span class="tag tag-${s.rec.kind}">${s.rec.kind === "claude" ? "CC" : "SH"}</span></div>
                 <div class="sess-sub">${escapeHtml(sub)}</div>
               </div>
               <span class="sess-key">${index <= 9 ? `⌘${index}` : ""}</span>
+              <button class="sess-edit" data-edit="${s.rec.id}" title="Rename (⌘⇧R)">✎</button>
               <button class="sess-close" data-close="${s.rec.id}" title="Close session">×</button>
             </div>`;
           })
           .join("");
-        return `<section class="proj${p.id === this.activeProjectId ? " active" : ""}">
+        const waiting = mine.filter((s) => s.status === "attention").length;
+        const summary = `${mine.length} session${mine.length === 1 ? "" : "s"}${waiting ? ` · ${waiting} waiting` : ""}`;
+        return `<section class="proj${p.id === this.activeProjectId ? " active" : ""}${p.collapsed ? " collapsed" : ""}" style="--proj: ${p.color}">
           <div class="proj-head" data-project="${p.id}">
+            <button class="proj-toggle" data-collapse="${p.id}" title="${p.collapsed ? "Expand" : "Collapse"}" aria-expanded="${!p.collapsed}">▾</button>
             <span class="proj-name">${escapeHtml(p.name)}</span>
-            <span class="proj-path">${escapeHtml(shortPath(p.path, home))}</span>
+            ${p.collapsed ? `<span class="proj-path proj-summary${waiting ? " waiting" : ""}">${summary}</span>` : `<span class="proj-path">${escapeHtml(shortPath(p.path, home))}</span>`}
             <span class="proj-actions">
-              <button data-new="claude" data-pid="${p.id}" title="New Claude session">✦</button>
+              <button data-new="claude" data-pid="${p.id}" title="New Claude session">✽</button>
               <button data-new="shell" data-pid="${p.id}" title="New shell">›_</button>
-              ${mine.length ? "" : `<button data-remove="${p.id}" title="Remove project">×</button>`}
+              ${mine.length ? `<button aria-disabled="true" title="Close its sessions first">×</button>` : `<button data-remove="${p.id}" title="Remove project">×</button>`}
             </span>
           </div>
-          ${rows || `<div class="proj-empty">no sessions</div>`}
+          ${p.collapsed ? "" : rows || `<div class="proj-empty">no sessions</div>`}
         </section>`;
       })
       .join("");
     $("#projects").innerHTML = html || `<div class="side-empty">No projects yet<br><span>⌘O to add one</span></div>`;
 
     const count = (st: string) => this.sessions.filter((s) => s.status === st).length;
-    $("#telemetry").innerHTML = `<span>${count("working")} working</span><span class="t-attention">${count("attention")} waiting</span><span>${n - count("working") - count("attention")} standby</span>`;
+    const exited = count("exited");
+    $("#telemetry").innerHTML = `<span>${count("working")} working</span><span class="t-attention">${count("attention")} waiting</span><span>${count("idle")} standby</span>${exited ? `<span class="t-exited">${exited} exited</span>` : ""}`;
   }
 
   /** Remaining plan usage per window, refreshed from what Claude Code last reported. */
@@ -342,7 +456,7 @@ export class App {
   private renderCrumbs() {
     const s = this.selected;
     const html = s
-      ? `<span class="c-proj">${escapeHtml(s.project.name)}</span> <span class="c-dim">▸</span> <span class="c-sess">${escapeHtml(s.rec.name)}</span> <span class="c-dim">· ${escapeHtml(shortPath(s.cwd, this.shell.home))}</span>`
+      ? `<span class="c-proj" style="--proj: ${s.project.color}">${escapeHtml(s.project.name)}</span> <span class="c-dim">▸</span> <span class="c-sess">${escapeHtml(s.rec.name)}</span> <span class="c-dim">· ${escapeHtml(shortPath(s.cwd, this.shell.home))}</span>`
       : `<span class="c-dim">No active mission</span>`;
     const el = $("#crumbs");
     if (el.innerHTML !== html) el.innerHTML = html;
@@ -353,20 +467,21 @@ export class App {
     document.querySelectorAll<HTMLElement>("[data-layout]").forEach((b) => b.classList.toggle("on", b.dataset.layout === this.layout));
     if (!this.sessions.length) {
       stage.className = "stage empty";
-      stage.innerHTML = `${HUD(this.projects.length)}<div class="splash"><pre class="logo">${LOGO}</pre>
+      stage.innerHTML = `${HUD(this.projects.length)}<div class="splash">${PLANET}<pre class="logo">${LOGO}</pre>
         <div class="splash-sub">Mission control for Claude Code · v0.1</div>
         <div class="splash-keys">
           <div><kbd>⌘O</kbd> add project</div><div><kbd>⌘N</kbd> new Claude session</div>
           <div><kbd>⌘T</kbd> open shell</div><div><kbd>⌘G</kbd> grid / focus</div>
           <div><kbd>⌘1-9</kbd> jump to session</div><div><kbd>⌘W</kbd> close session</div>
+          <div><kbd>⌘J</kbd> next waiting</div><div><kbd>⌘B</kbd> toggle sidebar</div>
+          <div><kbd>⌘P</kbd> aliases / servers</div>
         </div></div>`;
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches) stage.querySelector<SVGSVGElement>(".planet")?.pauseAnimations();
       return;
     }
     stage.querySelectorAll(".splash, .hud").forEach((el) => el.remove());
     const visible = this.layout === "grid" ? this.sessions : this.sessions.filter((s) => s.rec.id === this.selectedId);
     stage.className = `stage ${this.layout}`;
-    const cols = this.layout === "grid" ? Math.ceil(Math.sqrt(visible.length)) : 1;
-    stage.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
     for (const s of this.sessions) {
       if (!visible.includes(s)) s.el.remove();
     }
@@ -376,12 +491,27 @@ export class App {
     }
     // Keep DOM order matching session order in the grid.
     for (const s of visible) stage.appendChild(s.el);
+    this.layoutGrid();
+  }
+
+  /** Fits grid columns to the stage; the last pane spans any cells left empty in its row. */
+  private layoutGrid() {
+    const stage = $("#stage");
+    if (stage.classList.contains("empty")) return;
+    const panes = [...stage.querySelectorAll<HTMLElement>(":scope > .pane")];
+    const cols = this.layout === "grid" ? gridColumns(panes.length, stage.clientWidth, stage.clientHeight) : 1;
+    stage.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    const spare = (cols - (panes.length % cols)) % cols;
+    panes.forEach((el, i) => (el.style.gridColumn = i === panes.length - 1 && spare ? `span ${spare + 1}` : ""));
   }
 
   // ── input ────────────────────────────────────────────────────────────
 
   private bindChrome() {
+    $("#app").classList.toggle("no-sidebar", this.sidebarHidden);
+    $("#waiting-pill").addEventListener("click", () => this.nextWaiting());
     $("#add-project").addEventListener("click", () => this.addProject());
+    $("#open-aliases").addEventListener("click", () => this.aliases.open());
     $("#new-claude").addEventListener("click", () => this.newSession("claude"));
     $("#new-shell").addEventListener("click", () => this.newSession("shell"));
     document.querySelectorAll<HTMLElement>("[data-layout]").forEach((b) =>
@@ -392,6 +522,11 @@ export class App {
       const t = e.target as HTMLElement;
       const data = (attr: string) => t.closest<HTMLElement>(`[${attr}]`)?.getAttribute(attr) ?? undefined;
       const sessionById = (id?: string) => this.sessions.find((s) => s.rec.id === id);
+      const project = this.projects.find((p) => p.id === data("data-collapse"));
+      if (project) return this.toggleCollapsed(project);
+      const editing = sessionById(data("data-edit"));
+      const label = editing && t.closest(".sess")?.querySelector<HTMLElement>("[data-rename]");
+      if (editing && label) return this.startRename(label, editing);
       if (data("data-new")) return this.newSession(data("data-new") as Kind, data("data-pid"));
       if (data("data-remove")) return this.removeProject(data("data-remove")!);
       if (data("data-close")) return this.closeSession(sessionById(data("data-close")));
@@ -419,7 +554,9 @@ export class App {
       }
     });
     $("#stage").addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest("[data-action=relaunch]")) this.selected?.launch();
+      const t = e.target as HTMLElement;
+      if (t.closest("[data-action=relaunch]")) this.selected?.launch();
+      if (t.closest("[data-action=maximize]")) this.setLayout("focus");
     });
     $("#stage").addEventListener("dblclick", (e) => {
       if ((e.target as HTMLElement).closest(".pane-header") && this.layout === "grid") this.setLayout("focus");
@@ -429,20 +566,25 @@ export class App {
     window.addEventListener(
       "keydown",
       (e) => {
-        if (!e.metaKey || e.ctrlKey || e.altKey) return;
+        // The alias palette handles its own keys, ⌘P included.
+        if (!e.metaKey || e.ctrlKey || e.altKey || this.aliases.isOpen) return;
         const key = e.key.toLowerCase();
         const actions: Record<string, () => unknown> = {
           n: () => this.newSession("claude"),
           t: () => this.newSession("shell"),
           o: () => this.addProject(),
+          p: () => this.aliases.open(),
           w: () => this.closeSession(this.selected),
           g: () => this.setLayout(this.layout === "grid" ? "focus" : "grid"),
           k: () => this.selected?.clear(),
           r: () => this.selected?.status === "exited" && this.selected.launch(),
           "[": () => this.cycle(-1),
           "]": () => this.cycle(1),
+          j: () => this.nextWaiting(),
+          b: () => this.setSidebarHidden(!this.sidebarHidden),
         };
-        let action = e.shiftKey ? undefined : actions[key];
+        const shifted: Record<string, () => unknown> = { r: () => this.renameSelected() };
+        let action = (e.shiftKey ? shifted : actions)[key];
         if (/^[1-9]$/.test(key)) action = () => this.sessions[Number(key) - 1] && this.select(this.sessions[Number(key) - 1].rec.id);
         if (!action) return;
         e.preventDefault();

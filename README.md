@@ -46,6 +46,8 @@ a name taken from what it's actually working on. When an agent finishes or needs
 | `⌘T` | new shell | | `⌘[` / `⌘]` | previous / next session |
 | `⌘W` | close session | | `⌘K` | clear terminal |
 | `⌘R` / `⏎` | relaunch an exited session | | `⇧⏎` | newline in Claude's prompt |
+| `⌘J` | next waiting session | | `⌘B` | toggle sidebar |
+| `⌘⇧R` | rename session | | | |
 
 ## Launch sequence
 
