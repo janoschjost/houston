@@ -67,20 +67,20 @@ export interface SessionContext {
 
 /** Terminal palette built from the style.css tokens. */
 const THEME: ITheme = {
-  background: "#0B122000", // transparent: the pane's translucent fill and the backdrop show through
-  foreground: "#E1E9F5",
+  background: "#0d0f1200", // transparent: the pane's translucent fill and the backdrop show through
+  foreground: "#e3e7ed",
   cursor: "#8CC8F0",
-  cursorAccent: "#0B1220",
+  cursorAccent: "#0d0f12",
   selectionBackground: "#8CC8F040",
-  black: "#152036", red: "#F08A83", green: "#8FD8B4", yellow: "#F3C86F",
-  blue: "#8CC8F0", magenta: "#C3A6E8", cyan: "#86CFD6", white: "#E1E9F5",
-  brightBlack: "#5D6F8C", brightRed: "#F6A8A2", brightGreen: "#AEE5CA", brightYellow: "#F7D896",
-  brightBlue: "#B3DBF6", brightMagenta: "#D6C2F0", brightCyan: "#A9DEE3", brightWhite: "#F4F8FD",
+  black: "#1a1e24", red: "#F08A83", green: "#8FD8B4", yellow: "#F3C86F",
+  blue: "#8CC8F0", magenta: "#C3A6E8", cyan: "#86CFD6", white: "#e3e7ed",
+  brightBlack: "#5f6875", brightRed: "#F6A8A2", brightGreen: "#AEE5CA", brightYellow: "#F7D896",
+  brightBlue: "#B3DBF6", brightMagenta: "#D6C2F0", brightCyan: "#A9DEE3", brightWhite: "#f5f7fa",
 };
 
 const SEARCH: ISearchOptions = {
   decorations: {
-    matchBackground: "#2a3c58", matchOverviewRuler: "#8cc8f0",
+    matchBackground: "#343b46", matchOverviewRuler: "#8cc8f0",
     activeMatchBackground: "#7a6230", activeMatchColorOverviewRuler: "#f3c86f",
   },
 };
@@ -164,6 +164,7 @@ function markArt(color: string) {
   const shade = (dl: number) => fromHsl(h, s, Math.min(0.9, Math.max(0.1, l + dl)));
   // A half-block pixel is about 1.24 times taller than wide at 13px with line height 1.15, so x is stretched.
   const ASPECT = 1.24, W = 21, H = 16, cx = 10, cy = 7.5, R = 6.6;
+  const ring = rgb(color);
   const sx = R * Math.SQRT1_2, sy = cy - R * Math.SQRT1_2;
   const pixel = (x: number, y: number) => {
     const dx = (x - cx) / ASPECT;
@@ -171,7 +172,7 @@ function markArt(color: string) {
     if (ds < 1.3) return rgb("#eba582");
     if (ds < 2.4) return null;
     if (d < 3.3) return shade(dx + y < cy - 1 ? 0.12 : dx + y > cy + 1 ? -0.18 : 0);
-    if (Math.abs(d - R) < 0.7) return rgb("#8cc8f0");
+    if (Math.abs(d - R) < 0.7) return ring;
     return null;
   };
   const rows: string[] = [];
@@ -192,7 +193,7 @@ function markArt(color: string) {
 
 /** Banner printed into a new terminal before its process starts: the mark plus a launch readout. */
 function banner(rec: SessionRec, project: ProjectRec, home: string) {
-  const dim = fg("#5d6f8c"), title = fg("#8cc8f0"), text = fg("#e1e9f5"), reset = "\x1b[0m";
+  const dim = fg("#5f6875"), title = fg("#8cc8f0"), text = fg("#e3e7ed"), reset = "\x1b[0m";
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const fit = (s: string) => (s.length > 40 ? s.slice(0, 39) + "…" : s);
@@ -296,9 +297,10 @@ export class Session {
         this.launch();
         return false;
       }
-      // Shift+Enter inserts a newline in Claude Code's prompt.
+      // Shift+Enter inserts a newline in Claude Code's prompt; a bare LF (ctrl+J) works in every terminal setup.
       if (e.shiftKey && this.rec.kind === "claude") {
-        this.typed("\x1b\r");
+        e.preventDefault();
+        this.typed("\n");
         return false;
       }
       return true;

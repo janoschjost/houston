@@ -6,14 +6,14 @@
     <title>Houston</title>
     <!-- Inline so the boot screen is styled before the bundled stylesheet loads; colours mirror style.css. -->
     <style>
-      html, body { margin: 0; background: #0b1220; }
+      html, body { margin: 0; background: #0d0f12; }
       #boot {
         position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
         background:
-          linear-gradient(#8cc8f00d 1px, transparent 1px) 0 0 / 24px 24px,
-          linear-gradient(90deg, #8cc8f00d 1px, transparent 1px) 0 0 / 24px 24px,
-          radial-gradient(ellipse at 50% 42%, #13213a, #0b1220 70%);
-        color: #8394ad; font: 500 10.5px/1.4 "IBM Plex Mono", Menlo, monospace;
+          linear-gradient(#8cc8f017 1px, transparent 1px) 0 0 / 24px 24px,
+          linear-gradient(90deg, #8cc8f017 1px, transparent 1px) 0 0 / 24px 24px,
+          radial-gradient(ellipse at 50% 42%, #141b26, #0d0f12 70%);
+        color: #8b94a1; font: 500 10.5px/1.4 "IBM Plex Mono", Menlo, monospace;
         transition: opacity .4s cubic-bezier(.3, .7, .2, 1);
       }
       #boot.done { opacity: 0; pointer-events: none; }
@@ -23,10 +23,10 @@
       .boot-mark .draw { stroke-dasharray: 1; animation: boot-draw 1.2s cubic-bezier(.45, 0, .55, 1) both; }
       .boot-mark .faint { stroke-opacity: .38; animation: boot-fade .6s ease 1s both; }
       .boot-mark .tick { stroke-opacity: .55; }
-      .boot-mark .body { fill: #0f1b30; }
+      .boot-mark .body { fill: #121519; }
       .boot-sat { transform-origin: 50px 50px; animation: boot-spin 2.4s cubic-bezier(.45, 0, .55, 1) both, boot-spin 9.6s linear 2.4s infinite; }
-      .boot-sat circle { fill: #eba582; stroke: #0f1b30; stroke-width: 4px; }
-      .boot-title { color: #e1e9f5; font: 600 30px/1 "IBM Plex Sans Condensed", "Arial Narrow", sans-serif; letter-spacing: .32em; margin-right: -.32em; animation: boot-track 1.2s cubic-bezier(.45, 0, .55, 1) .3s both; }
+      .boot-sat circle { fill: #eba582; stroke: #121519; stroke-width: 4px; }
+      .boot-title { color: #e3e7ed; font: 600 30px/1 "IBM Plex Sans Condensed", "Arial Narrow", sans-serif; letter-spacing: .32em; margin-right: -.32em; animation: boot-track 1.2s cubic-bezier(.45, 0, .55, 1) .3s both; }
       .boot-sub { margin-top: 10px; letter-spacing: .3em; margin-right: -.3em; text-transform: uppercase; font-size: 10px; }
       .boot-status { display: inline-flex; align-items: center; gap: 10px; letter-spacing: .2em; text-transform: uppercase; }
       .boot-status.failed { color: #f08a83; text-transform: none; letter-spacing: 0; max-width: 60ch; }

@@ -348,9 +348,17 @@ export class App {
     }
     const index = this.sessions.indexOf(s);
     this.sessions.splice(index, 1);
-    if (this.layout === "split" && this.splitIds.includes(s.rec.id)) this.layout = "focus";
+    let next = this.sessions[Math.min(index, this.sessions.length - 1)]?.rec.id;
+    const slot = this.splitIds.indexOf(s.rec.id);
+    if (slot >= 0) {
+      this.splitIds.splice(slot, 1);
+      if (this.layout === "split") {
+        if (this.splitIds.length < 2) this.layout = "focus";
+        else next = this.splitIds[Math.min(slot, this.splitIds.length - 1)];
+      }
+    }
     s.dispose();
-    if (this.selectedId === s.rec.id) this.select(this.sessions[Math.min(index, this.sessions.length - 1)]?.rec.id);
+    if (this.selectedId === s.rec.id) this.select(next);
     else this.renderAll();
     this.save();
   }
@@ -449,11 +457,30 @@ export class App {
     this.setLayout("split");
   }
 
-  /** Puts a session in one side of the split, swapping sides if it already shows in the other. */
-  private placeInSplit(s: Session, slot: number) {
-    const other = this.splitIds.indexOf(s.rec.id);
-    if (other >= 0) this.splitIds[other] = this.splitIds[slot];
-    this.splitIds[slot] = s.rec.id;
+  /**
+   * Drops a session on a pane of the stage. In focus view it splits the shown session with it; in split view it
+   * is inserted before/after the pane (or takes its place, swapping if it already shows); in a grid it reorders.
+   */
+  private dropOnStage(s: Session, target: Session, mode: "before" | "after" | "replace") {
+    if (this.layout === "grid") {
+      if (mode === "replace" || target.project !== s.project) return;
+      s.rec.collapsed = false;
+      this.moveSession(s, target, mode === "after");
+      return this.select(s.rec.id);
+    }
+    const ids = this.layout === "split" ? this.splitIds.filter((id) => this.sessions.some((x) => x.rec.id === id)) : [target.rec.id];
+    if (mode === "replace") {
+      const from = ids.indexOf(s.rec.id), at = ids.indexOf(target.rec.id);
+      if (from >= 0) ids[from] = target.rec.id;
+      ids[at] = s.rec.id;
+    } else {
+      const rest = ids.filter((id) => id !== s.rec.id);
+      rest.splice(rest.indexOf(target.rec.id) + (mode === "after" ? 1 : 0), 0, s.rec.id);
+      ids.splice(0, ids.length, ...rest);
+    }
+    this.splitIds = ids;
+    this.layout = "split";
+    this.gridProjectId = undefined;
     this.select(s.rec.id);
   }
 
@@ -479,12 +506,12 @@ export class App {
     this.save();
   }
 
-  /** Sessions on stage for the current layout; a split missing a session shows the selection alone. */
+  /** Sessions on stage for the current layout; a split left with one session shows the selection alone. */
   private visibleSessions() {
     if (this.layout === "grid") return this.gridSessions().filter((s) => !s.rec.collapsed);
     if (this.layout === "split") {
       const pair = this.splitIds.map((id) => this.sessions.find((s) => s.rec.id === id)).filter((s): s is Session => !!s);
-      if (pair.length === 2) return pair;
+      if (pair.length >= 2) return pair;
     }
     return this.sessions.filter((s) => s.rec.id === this.selectedId);
   }
@@ -580,8 +607,10 @@ export class App {
         return `<section class="proj${p.id === this.activeProjectId ? " active" : ""}${p.collapsed ? " collapsed" : ""}" style="--proj: ${p.color}">
           <div class="proj-head" data-project="${p.id}">
             <button class="proj-toggle" data-collapse="${p.id}" title="${p.collapsed ? "Expand" : "Collapse"}" aria-expanded="${!p.collapsed}">${icon("chevron")}</button>
-            <span class="proj-name">${escapeHtml(p.name)}</span>
-            ${p.collapsed ? `<span class="proj-path proj-summary${waiting ? " waiting" : ""}">${summary}</span>` : `<span class="proj-path">${escapeHtml(shortPath(p.path, home))}</span>`}
+            <div class="proj-title">
+              <span class="proj-name">${escapeHtml(p.name)}</span>
+              ${p.collapsed ? `<span class="proj-path proj-summary${waiting ? " waiting" : ""}">${summary}</span>` : `<span class="proj-path" title="${escapeHtml(p.path)}">${escapeHtml(shortPath(p.path, home))}</span>`}
+            </div>
             ${badge ? `<button class="proj-git" data-diff="${p.id}" title="Show uncommitted changes (⌘D)">${badge}</button>` : ""}
             <span class="proj-actions">
               ${mine.length ? `<button data-grid="${p.id}" title="Open in grid">${icon("grid")}</button>` : ""}
@@ -778,7 +807,7 @@ export class App {
 
   /**
    * Drags a sidebar row to a new position among its project's sessions; the grid and ⌘1–9 follow that order.
-   * In split view, dropping it on a pane puts it in that side instead.
+   * Dropping it on a pane of the stage splits or rearranges the view instead.
    */
   private dragSession(e: PointerEvent) {
     const t = e.target as HTMLElement;
@@ -787,21 +816,27 @@ export class App {
     if (!row || !s || e.button !== 0 || t.closest("button, input")) return;
     const [startX, startY] = [e.clientX, e.clientY];
     let drop: { s: Session; after: boolean } | null = null;
-    let slot = -1;
+    let onStage: { s: Session; mode: "before" | "after" | "replace" } | null = null;
+    let ghost: ReturnType<typeof this.dragGhost> | undefined;
     const clear = () =>
       document.querySelectorAll(".drop-before, .drop-after, .drop-replace").forEach((el) => el.classList.remove("drop-before", "drop-after", "drop-replace"));
     const move = (ev: PointerEvent) => {
       if (!this.reordering && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return;
       this.reordering = true;
+      ghost ??= this.dragGhost(s);
+      ghost.move(ev);
       row.classList.add("dragging");
       clear();
       drop = null;
-      slot = -1;
+      onStage = null;
       const hit = document.elementFromPoint(ev.clientX, ev.clientY);
-      const pane = this.layout === "split" ? hit?.closest<HTMLElement>("#stage .pane") : null;
-      if (pane && pane.dataset.id !== s.rec.id) {
-        slot = this.splitIds.indexOf(pane.dataset.id!);
-        if (slot >= 0) pane.classList.add("drop-replace");
+      const pane = hit?.closest<HTMLElement>("#stage .pane");
+      if (pane) {
+        const target = this.sessions.find((x) => x.rec.id === pane.dataset.id);
+        if (target && target !== s && (this.layout !== "grid" || target.project === s.project)) {
+          onStage = { s: target, mode: this.stageZone(ev, pane) };
+          pane.classList.add(`drop-${onStage.mode}`);
+        }
         return;
       }
       const over = hit?.closest<HTMLElement>(".sess");
@@ -816,12 +851,13 @@ export class App {
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       clear();
+      ghost?.end();
       row.classList.remove("dragging");
       if (!this.reordering) return;
       this.reordering = false;
       this.suppressClick = true;
       setTimeout(() => (this.suppressClick = false));
-      if (slot >= 0) return this.placeInSplit(s, slot);
+      if (onStage) return this.dropOnStage(s, onStage.s, onStage.mode);
       if (drop) this.moveSession(s, drop.s, drop.after);
       this.renderAll();
     };
@@ -830,39 +866,69 @@ export class App {
     window.addEventListener("pointercancel", up);
   }
 
-  /** Drags a grid pane by its header onto another of its project's panes. */
+  /** A chip with the session's name that follows the pointer while dragging; blocks text selection until `end()`. */
+  private dragGhost(s: Session) {
+    const el = document.createElement("div");
+    el.className = "drag-ghost";
+    el.style.setProperty("--proj", s.project.color);
+    el.innerHTML = `${light(s.rec.kind)}<span>${escapeHtml(s.rec.name)}</span>`;
+    const noSelect = (e: Event) => e.preventDefault();
+    document.addEventListener("selectstart", noSelect);
+    document.body.classList.add("is-dragging");
+    document.body.appendChild(el);
+    window.getSelection()?.removeAllRanges();
+    return {
+      move: (ev: PointerEvent) => (el.style.transform = `translate(${ev.clientX + 14}px, ${ev.clientY + 14}px)`),
+      end: () => {
+        el.remove();
+        document.removeEventListener("selectstart", noSelect);
+        document.body.classList.remove("is-dragging");
+      },
+    };
+  }
+
+  /** Where a pointer is on a pane: its left/right edge inserts beside it, the middle (split view only) replaces it. */
+  private stageZone(ev: PointerEvent, pane: HTMLElement) {
+    const r = pane.getBoundingClientRect();
+    const f = (ev.clientX - r.left) / r.width;
+    if (this.layout === "split" && f >= 0.3 && f <= 0.7) return "replace";
+    return f < 0.5 ? "before" : "after";
+  }
+
+  /** Drags a pane by its header onto another pane to rearrange the grid or split view. */
   private dragPane(e: PointerEvent) {
     const t = e.target as HTMLElement;
     const pane = t.closest<HTMLElement>(".pane");
     const s = this.sessions.find((x) => x.rec.id === pane?.dataset.id);
-    if (this.layout !== "grid" || !pane || !s || e.button !== 0 || !t.closest(".pane-header") || t.closest("button")) return;
+    if (this.layout === "focus" || !pane || !s || e.button !== 0 || !t.closest(".pane-header") || t.closest("button")) return;
     const [startX, startY] = [e.clientX, e.clientY];
     let dragging = false;
-    let drop: { s: Session; after: boolean } | null = null;
-    const clear = () => document.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
+    let ghost: ReturnType<typeof this.dragGhost> | undefined;
+    let drop: { s: Session; mode: "before" | "after" | "replace" } | null = null;
+    const clear = () => document.querySelectorAll(".drop-before, .drop-after, .drop-replace").forEach((el) => el.classList.remove("drop-before", "drop-after", "drop-replace"));
     const move = (ev: PointerEvent) => {
       if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return;
       dragging = true;
+      ghost ??= this.dragGhost(s);
+      ghost.move(ev);
       pane.classList.add("dragging");
       clear();
       drop = null;
       const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>(".pane");
       const target = this.sessions.find((x) => x.rec.id === over?.dataset.id);
-      if (!over || !target || target === s || target.project !== s.project) return;
-      const r = over.getBoundingClientRect();
-      drop = { s: target, after: ev.clientX > r.left + r.width / 2 };
-      over.classList.add(drop.after ? "drop-after" : "drop-before");
+      if (!over || !target || target === s || (this.layout === "grid" && target.project !== s.project)) return;
+      drop = { s: target, mode: this.stageZone(ev, over) };
+      over.classList.add(`drop-${drop.mode}`);
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       clear();
+      ghost?.end();
       pane.classList.remove("dragging");
       if (!drop) return;
-      this.moveSession(s, drop.s, drop.after);
-      this.renderAll();
-      this.selected?.focus();
+      this.dropOnStage(s, drop.s, drop.mode);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);

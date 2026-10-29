@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-8cc8f0?style=flat-square&labelColor=0b1220">
-  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-8cc8f0?style=flat-square&labelColor=0b1220">
-  <img alt="Rust" src="https://img.shields.io/badge/Rust-backend-eba582?style=flat-square&labelColor=0b1220">
-  <img alt="xterm.js" src="https://img.shields.io/badge/xterm.js-6-a9b8ff?style=flat-square&labelColor=0b1220">
-  <img alt="macOS" src="https://img.shields.io/badge/platform-macOS-8fd8b4?style=flat-square&labelColor=0b1220">
+  <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-8cc8f0?style=flat-square&labelColor=0d0f12">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-8cc8f0?style=flat-square&labelColor=0d0f12">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-backend-eba582?style=flat-square&labelColor=0d0f12">
+  <img alt="xterm.js" src="https://img.shields.io/badge/xterm.js-6-a9b8ff?style=flat-square&labelColor=0d0f12">
+  <img alt="macOS" src="https://img.shields.io/badge/platform-macOS-8fd8b4?style=flat-square&labelColor=0d0f12">
 </p>
 
 ```text
