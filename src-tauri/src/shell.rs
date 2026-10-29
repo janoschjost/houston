@@ -333,6 +333,39 @@ pub async fn git_status(cwd: String) -> Option<GitStatus> {
     Some(s)
 }
 
+/// Resolves `rel` inside `cwd`, refusing absolute paths and anything that climbs out of the project.
+fn project_file(cwd: &str, rel: &str) -> Result<PathBuf, String> {
+    let rel = Path::new(rel);
+    if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("path outside the project".into());
+    }
+    Ok(Path::new(cwd).join(rel))
+}
+
+/// Largest file the changes panel will open for editing.
+const EDIT_LIMIT: u64 = 2 << 20;
+
+/// Text of a project file, for inline editing in the changes panel.
+#[tauri::command]
+pub async fn read_project_file(cwd: String, path: String) -> Result<String, String> {
+    let file = project_file(&cwd, &path)?;
+    let meta = fs::metadata(&file).map_err(|e| e.to_string())?;
+    if meta.len() > EDIT_LIMIT {
+        return Err("file too large to edit".into());
+    }
+    String::from_utf8(fs::read(&file).map_err(|e| e.to_string())?).map_err(|_| "not a UTF-8 text file".to_string())
+}
+
+/// Overwrites an existing project file with edited text.
+#[tauri::command]
+pub async fn write_project_file(cwd: String, path: String, content: String) -> Result<(), String> {
+    let file = project_file(&cwd, &path)?;
+    if !file.is_file() {
+        return Err("file no longer exists".into());
+    }
+    fs::write(&file, content).map_err(|e| e.to_string())
+}
+
 /// Upper bound on the diff text sent to the UI; a huge generated file must not freeze the panel.
 const DIFF_LIMIT: usize = 4 << 20;
 

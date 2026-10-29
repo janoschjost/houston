@@ -966,7 +966,7 @@ main {
 .df-add, .dl-add { color: var(--green); }
 .df-del, .dl-del { color: var(--red); }
 .df-add, .df-del { font-size: 10px; font-variant-numeric: tabular-nums; }
-.diff-body { overflow: auto; user-select: text; }
+.diff-body { overflow: auto; user-select: text; display: flex; flex-direction: column; }
 .diff-body pre { margin: 0; padding: 8px 0; font: 11.5px/1.45 var(--mono); }
 .diff-body pre > div { padding: 0 12px; white-space: pre; min-width: max-content; }
 .dl-add { background: color-mix(in srgb, var(--green) 8%, transparent); }
@@ -1002,3 +1002,27 @@ main {
 .drag-ghost span { overflow: hidden; text-overflow: ellipsis; }
 .is-dragging, .is-dragging * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
 .is-dragging .xterm { pointer-events: none; }
+
+/* inline editing in the changes panel */
+.diff-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 5px 12px; background: var(--panel); border-bottom: 1px solid var(--border); font: 11.5px var(--mono); }
+.diff-bar .c-dim { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-bar button { padding: 2px 8px; border: 1px solid var(--border-hi); border-radius: 3px; color: var(--text); }
+.diff-bar button:hover { background: var(--raised); }
+.diff-bar button.primary { border-color: var(--accent); color: var(--accent); }
+.diff-bar kbd { margin-left: 4px; opacity: 0.6; }
+.diff-body pre { flex: none; }
+.diff-edit {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  resize: none;
+  border: 0;
+  outline: none;
+  padding: 8px 12px;
+  background: var(--bg);
+  color: var(--text);
+  font: 11.5px/1.45 var(--mono);
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}

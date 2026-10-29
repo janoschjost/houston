@@ -68,6 +68,8 @@ fn main() {
             shell::git_refs,
             shell::git_status,
             shell::git_diff,
+            shell::read_project_file,
+            shell::write_project_file,
             shell::launch_detached,
             shell::npm_scripts,
             shell::claude_session_exists,

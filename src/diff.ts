@@ -1,3 +1,4 @@
+import { ask } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import { icon } from "./icons";
 
@@ -50,6 +51,8 @@ export class DiffPanel {
   private listEl: HTMLElement;
   private bodyEl: HTMLElement;
   private titleEl: HTMLElement;
+  /** The file being edited in place, with its text as loaded; null while reading diffs. */
+  private editing: { path: string; original: string; area: HTMLTextAreaElement } | null = null;
 
   /** `closed` runs whenever the panel closes, e.g. to give the terminal its focus back. */
   constructor(private closed: () => void) {
@@ -68,13 +71,27 @@ export class DiffPanel {
     this.el.querySelector("[data-refresh]")!.addEventListener("click", () => this.load());
     this.listEl.addEventListener("click", (e) => {
       const i = Number((e.target as HTMLElement).closest<HTMLElement>("[data-i]")?.dataset.i);
-      if (!Number.isNaN(i)) this.show(i);
+      if (!Number.isNaN(i)) this.go(i);
+    });
+    this.bodyEl.addEventListener("click", (e) => {
+      const action = (e.target as HTMLElement).closest<HTMLElement>("[data-edit]")?.dataset.edit;
+      if (action === "start") this.startEdit();
+      else if (action === "save") this.save();
+      else if (action === "cancel") this.cancelEdit();
     });
     this.el.addEventListener("keydown", (e) => {
       e.stopPropagation();
+      if (this.editing) {
+        if (e.key === "Escape") this.cancelEdit();
+        else if (e.key === "s" && e.metaKey) this.save();
+        else if (e.key === "Tab" && !e.shiftKey) document.execCommand("insertText", false, "  ");
+        else return;
+        e.preventDefault();
+        return;
+      }
       const step = e.key === "ArrowDown" || e.key === "j" ? 1 : e.key === "ArrowUp" || e.key === "k" ? -1 : 0;
       if (e.key === "Escape") this.close();
-      else if (step && this.files.length) this.show((this.index + step + this.files.length) % this.files.length);
+      else if (step && this.files.length) this.go((this.index + step + this.files.length) % this.files.length);
       else return;
       e.preventDefault();
     });
@@ -93,9 +110,73 @@ export class DiffPanel {
     await this.load();
   }
 
-  close() {
+  async close() {
+    if (!(await this.discardable())) return;
+    this.editing = null;
     this.el.classList.add("hidden");
     this.closed();
+  }
+
+  private get dirty() {
+    return !!this.editing && this.editing.area.value !== this.editing.original;
+  }
+
+  /** True when no unsaved edit would be lost, or the user agrees to lose it. */
+  private async discardable() {
+    return !this.dirty || ask(`Discard unsaved edits to ${this.editing!.path}?`, { title: "Houston", kind: "warning", okLabel: "Discard" });
+  }
+
+  private async go(index: number) {
+    if (index === this.index && !this.editing) return;
+    if (!(await this.discardable())) return;
+    this.editing = null;
+    this.show(index);
+  }
+
+  /** Swaps the diff for an editable copy of the whole file, scrolled to its first change. */
+  private async startEdit() {
+    const f = this.files[this.index];
+    if (!f || f.binary || f.status === "deleted") return;
+    try {
+      const text = await api.readProjectFile(this.cwd, f.path);
+      const area = document.createElement("textarea");
+      area.className = "diff-edit";
+      area.spellcheck = false;
+      area.value = text;
+      this.editing = { path: f.path, original: text, area };
+      this.bodyEl.innerHTML = `<div class="diff-bar"><span class="c-dim">Editing ${escapeHtml(f.path)}</span><button data-edit="cancel">Cancel <kbd>esc</kbd></button><button data-edit="save" class="primary">Save <kbd>⌘S</kbd></button></div>`;
+      this.bodyEl.appendChild(area);
+      const first = Number(f.lines.find((l) => l.startsWith("@@"))?.match(/\+(\d+)/)?.[1] ?? 1);
+      const offset = text.split("\n").slice(0, Math.max(0, first - 1)).join("\n").length;
+      area.focus();
+      area.setSelectionRange(offset, offset);
+      area.scrollTop = Math.max(0, first - 4) * parseFloat(getComputedStyle(area).lineHeight || "17");
+    } catch (e) {
+      this.bodyEl.insertAdjacentHTML("afterbegin", `<div class="pal-empty">${escapeHtml(String(e))}</div>`);
+    }
+  }
+
+  private async save() {
+    if (!this.editing) return;
+    const { path, area } = this.editing;
+    try {
+      await api.writeProjectFile(this.cwd, path, area.value);
+    } catch (e) {
+      this.bodyEl.querySelector(".diff-bar .c-dim")!.textContent = `Save failed: ${e}`;
+      return;
+    }
+    this.editing = null;
+    await this.load();
+  }
+
+  private cancelEdit() {
+    if (!this.editing) return;
+    this.discardable().then((ok) => {
+      if (!ok) return;
+      this.editing = null;
+      this.show(this.index);
+      this.el.focus();
+    });
   }
 
   private async load() {
@@ -137,7 +218,8 @@ export class DiffPanel {
           .slice(0, MAX_LINES)
           .map((l) => `<div class="${cls(l)}">${escapeHtml(l) || " "}</div>`)
           .join("") + (f.lines.length > MAX_LINES ? `<div class="dl-note">… ${f.lines.length - MAX_LINES} more lines</div>` : "");
-    this.bodyEl.innerHTML = `<pre>${body}</pre>`;
+    const editable = !f.binary && f.status !== "deleted";
+    this.bodyEl.innerHTML = `${editable ? `<div class="diff-bar"><span class="c-dim">${escapeHtml(f.path)}</span><button data-edit="start">Edit file</button></div>` : ""}<pre>${body}</pre>`;
     this.bodyEl.scrollTop = 0;
   }
 }
