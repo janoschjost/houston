@@ -65,6 +65,17 @@ export interface SessionContext {
   isSelected(s: Session): boolean;
 }
 
+/** Cmd/Option editing shortcuts that xterm would otherwise drop or encode as unusable CSI sequences. */
+const EDIT_KEYS: Record<string, string> = {
+  "cmd+Backspace": "\x15", // kill to line start
+  "cmd+ArrowLeft": "\x01", // line start
+  "cmd+ArrowRight": "\x05", // line end
+  "alt+ArrowLeft": "\x1bb", // word back
+  "alt+ArrowRight": "\x1bf", // word forward
+  "alt+Backspace": "\x17", // delete word back
+  "alt+Delete": "\x1bd", // delete word forward
+};
+
 /** Terminal palette built from the style.css tokens. */
 const THEME: ITheme = {
   background: "#0d0f1200", // transparent: the pane's translucent fill and the backdrop show through
@@ -291,6 +302,12 @@ export class Session {
     this.term.onResize(({ cols, rows }) => this.ptyId && api.resize(this.ptyId, cols, rows));
     this.term.parser.registerOscHandler(6973, (data) => this.onShellEvent(data));
     this.term.attachCustomKeyEventHandler((e) => {
+      // macOS line/word editing keys, sent as the readline sequences every shell and Claude Code's prompt understand.
+      const edit = !e.ctrlKey && !e.shiftKey && EDIT_KEYS[`${e.metaKey ? "cmd" : e.altKey ? "alt" : ""}+${e.key}`];
+      if (edit) {
+        if (e.type === "keydown") this.typed(edit);
+        return false;
+      }
       if (e.metaKey) return false; // app shortcuts and menu clipboard
       if (e.type !== "keydown" || e.key !== "Enter") return true;
       if (this.status === "exited") {
