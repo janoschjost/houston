@@ -1004,25 +1004,55 @@ main {
 .is-dragging .xterm { pointer-events: none; }
 
 /* inline editing in the changes panel */
-.diff-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 5px 12px; background: var(--panel); border-bottom: 1px solid var(--border); font: 11.5px var(--mono); }
-.diff-bar .c-dim { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 5px 12px; background: var(--panel); border-bottom: 1px solid var(--border); font: 11.5px var(--mono); flex: none; }
+.diff-bar .c-dim:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .diff-bar button { padding: 2px 8px; border: 1px solid var(--border-hi); border-radius: 3px; color: var(--text); }
 .diff-bar button:hover { background: var(--raised); }
-.diff-bar button.primary { border-color: var(--accent); color: var(--accent); }
-.diff-bar kbd { margin-left: 4px; opacity: 0.6; }
 .diff-body pre { flex: none; }
-.diff-edit {
-  flex: 1;
-  min-height: 0;
+.ed { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
+.ed-wrap { position: relative; display: flex; min-height: 100%; min-width: max-content; font: 11.5px/17px var(--mono); }
+.ed-gutter { position: sticky; left: 0; z-index: 1; flex: none; padding: 8px 0; background: var(--panel); border-right: 1px solid var(--border); color: var(--faint); text-align: right; cursor: default; }
+.ed-ln { height: 17px; padding: 0 8px 0 6px; position: relative; }
+.ed-ln.add { box-shadow: inset 3px 0 0 var(--green); color: var(--green); }
+.ed-ln.del::before, .ed-ln.del-after::after { content: ""; position: absolute; left: 0; width: 0; height: 0; border: 4px solid transparent; border-left-color: var(--red); cursor: pointer; }
+.ed-ln.del::before { top: -4px; }
+.ed-ln.del-after::after { bottom: -4px; }
+.ed-stack { position: relative; flex: 1; padding: 8px 0; min-width: max-content; }
+.ed-mirror { min-width: max-content; pointer-events: none; }
+.ed-l { height: 17px; padding: 0 16px 0 10px; white-space: pre; color: var(--text); }
+.ed-l.add { background: color-mix(in srgb, var(--green) 9%, transparent); }
+.ed-area {
+  position: absolute;
+  inset: 8px 0;
   width: 100%;
+  height: calc(100% - 16px);
+  margin: 0;
+  padding: 0 16px 0 10px;
   resize: none;
   border: 0;
   outline: none;
-  padding: 8px 12px;
-  background: var(--bg);
-  color: var(--text);
-  font: 11.5px/1.45 var(--mono);
-  tab-size: 2;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+  font: inherit;
   white-space: pre;
+  tab-size: 2;
+}
+.ed-area::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.ed-old {
+  position: absolute;
+  z-index: 3;
+  margin: 0;
+  max-width: 80%;
+  max-height: 40%;
   overflow: auto;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--red) 12%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  border-radius: 3px;
+  color: var(--red);
+  cursor: pointer;
+  font: inherit;
+  white-space: pre;
 }

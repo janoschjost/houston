@@ -342,6 +342,21 @@ fn project_file(cwd: &str, rel: &str) -> Result<PathBuf, String> {
     Ok(Path::new(cwd).join(rel))
 }
 
+/// A file's content at HEAD, empty when it is new or the repository has no commits.
+#[tauri::command]
+pub async fn git_head_file(cwd: String, path: String) -> String {
+    if project_file(&cwd, &path).is_err() {
+        return String::new();
+    }
+    Command::new("git")
+        .args(["-C", &cwd, "--no-optional-locks", "show", &format!("HEAD:{path}")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
 /// Largest file the changes panel will open for editing.
 const EDIT_LIMIT: u64 = 2 << 20;
 

@@ -79,6 +79,7 @@ export const api = {
   gitRefs: (cwd: string) => invoke<string[]>("git_refs", { cwd }),
   gitStatus: (cwd: string) => invoke<GitStatus | null>("git_status", { cwd }),
   gitDiff: (cwd: string) => invoke<string>("git_diff", { cwd }),
+  gitHeadFile: (cwd: string, path: string) => invoke<string>("git_head_file", { cwd, path }),
   readProjectFile: (cwd: string, path: string) => invoke<string>("read_project_file", { cwd, path }),
   writeProjectFile: (cwd: string, path: string, content: string) => invoke<void>("write_project_file", { cwd, path, content }),
   launchDetached: (cwd: string, command: string) => invoke<void>("launch_detached", { cwd, command }),
