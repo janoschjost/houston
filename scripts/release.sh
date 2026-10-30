@@ -38,5 +38,5 @@ git commit -m "Release $tag"
 git tag "$tag"
 git push origin main "$tag"
 
-echo "Pushed $tag, the release workflow is building a draft release:"
+echo "Pushed $tag, the release workflow is building a release:"
 echo "  https://github.com/janoschjost/houston/actions"

@@ -57,5 +57,5 @@ jobs:
           tagName: v__VERSION__
           releaseName: Houston v__VERSION__
           releaseBody: See the assets below to download Houston.
-          releaseDraft: true
+          releaseDraft: false
           args: --target universal-apple-darwin
