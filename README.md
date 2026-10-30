@@ -50,6 +50,7 @@ telemetry and calls you back when an agent lands or needs a decision.
 | **Smart notifications** | Houston only interrupts when an agent is waiting, a long shell command fails or a process crashes. `Send cost digest` in the palette summarises spend. |
 | **Remote glance** | Opt-in from the palette: a read-only status page on your local network (secret link, copied to the clipboard) to check the fleet from a phone. |
 | **Mission patches** | Each project gets its own colour, used in the sidebar, the pane header, the diff panel and the palette. Fold projects you're not working on. |
+| **Updates** | Houston looks for a newer GitHub release on launch, notifies you, and installs it from the palette with a restart. |
 | **Project actions** | Right-click a project to open it in your editor or Finder, run an npm script, or open a pull request. |
 
 <p align="center">
@@ -88,7 +89,10 @@ T-0  ▸ liftoff         npm run tauri build   →  src-tauri/target/release/bun
 
 To cut a release, run `scripts/release.sh 0.2.0`. It bumps the version, tags and pushes, and the
 [release workflow](.github/workflows/release.yml) builds a universal `.dmg` into a draft GitHub release.
-Builds are signed and notarized when the Apple secrets are set, and unsigned otherwise.
+Builds are signed and notarized when the Apple secrets are set, and unsigned otherwise. Publish the draft to ship it:
+Houston checks the latest published release on launch and offers it as `Install update …` in the palette (or run
+`Check for updates`). The updater bundle is signed with `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, which must be set as repo secrets and match the `pubkey` in `tauri.conf.json`.
 
 ## Under the hood
 

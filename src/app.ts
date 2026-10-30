@@ -1,6 +1,8 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import { AliasPalette } from "./aliases";
 import { api, type FileEdit, type GitStatus, type LimitWindow, type RateLimits, type ShellInfo } from "./api";
 import { Completer } from "./completion";
@@ -192,6 +194,8 @@ export class App {
   private sidebarKey = "";
   private badge = 0;
   private notifyAllowed = false;
+  /** Newer release found on GitHub, offered in the palette. */
+  private update?: Update;
   /** Sidebar re-renders are paused while a session name is being edited in place. */
   private renaming = false;
   /** Sidebar re-renders are paused while a session row is dragged to a new position. */
@@ -274,6 +278,7 @@ export class App {
     setInterval(() => this.pollUsage(), 5_000);
     this.notifyAllowed = (await isPermissionGranted()) || (await requestPermission()) === "granted";
     if (saved?.remote) void this.startRemote(false);
+    void this.checkForUpdate(false);
   }
 
   // ── state ────────────────────────────────────────────────────────────
@@ -714,6 +719,34 @@ export class App {
       .map((s) => `${s.rec.name} $${s.stats!.cost_usd!.toFixed(2)}`)
       .join(" · ");
     this.notify("Houston cost digest", `${this.digest()}${top ? `\n${top}` : ""}`);
+  }
+
+  /** Looks for a newer GitHub release. Launch checks stay quiet unless one is found; the palette one always answers. */
+  private async checkForUpdate(manual: boolean) {
+    try {
+      this.update = (await check()) ?? undefined;
+    } catch (err) {
+      if (manual) await message(`Could not check for updates: ${err}`, { title: "Houston", kind: "error" });
+      return;
+    }
+    if (!this.update) {
+      if (manual) await message("Houston is up to date.", { title: "Houston" });
+      return;
+    }
+    if (!manual) return this.notify("Houston update available", `Version ${this.update.version} is ready. Install it from the palette (⌘P).`);
+    await this.installUpdate();
+  }
+
+  private async installUpdate() {
+    const u = this.update!;
+    const notes = u.body ? `\n\n${u.body}` : "";
+    if (!(await ask(`Install Houston ${u.version}? You have ${u.currentVersion}.${notes}\n\nHouston restarts afterwards; agents resume where they stopped.`, { title: "Houston update", okLabel: "Install and restart" }))) return;
+    try {
+      await u.downloadAndInstall();
+    } catch (err) {
+      return void message(`Could not install the update: ${err}`, { title: "Houston", kind: "error" });
+    }
+    await relaunch();
   }
 
   private async toggleRemote() {
@@ -1353,6 +1386,9 @@ export class App {
       { group: "Actions", label: "Aliases…", hint: "⌘⇧P", run: () => this.aliases.open() },
       { group: "Actions", label: "Send cost digest", detail: this.digest(), run: () => this.sendDigest() },
       { group: "Actions", label: this.remoteUrl ? "Remote glance: turn off" : "Remote glance: turn on…", detail: "read-only status page for your phone", run: () => this.toggleRemote() },
+      this.update
+        ? { group: "Actions", label: `Install update ${this.update.version}`, detail: `you have ${this.update.currentVersion}`, run: () => this.installUpdate() }
+        : { group: "Actions", label: "Check for updates", run: () => this.checkForUpdate(true) },
     ];
     const perProject = await Promise.all(this.projects.map(async (p) => ({ p, actions: await this.projectActions(p) })));
     for (const { p, actions } of perProject) {
