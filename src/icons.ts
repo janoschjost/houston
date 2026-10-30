@@ -11,11 +11,16 @@ const PATHS = {
   focus: "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5",
   grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
   split: "M4 4.5h16v15H4zM12 4.5v15",
+  sidebar: "M4 4.5h16v15H4zM9.5 4.5v15",
   limits: "M4 17a8 8 0 1 1 16 0M12 17l4-5M4 20.5h16",
   close: "M6.5 6.5l11 11M17.5 6.5l-11 11",
   collapse: "M6 13.5h12",
   chevron: "M7 9.5l5 5 5-5",
   edit: "M4.5 19.5h4l10-10-4-4-10 10zM13 7l4 4",
+  timeline: "M5 4v16M5 7h6M5 12h10M5 17h7",
+  inbox: "M4 13.5l2.5-8h11l2.5 8v5h-16zM4 13.5h5l1 2.5h4l1-2.5h5",
+  warn: "M12 4l9 15.5H3zM12 10v4.5M12 17v.3",
+  remote: "M8 3.5h8v17H8zM11 17.5h2",
   refresh: "M19 12a7 7 0 1 1-2.05-4.95M19.5 4v4h-4",
 } as const;
 

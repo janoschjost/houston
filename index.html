@@ -44,11 +44,13 @@
     <div id="app">
       <aside id="sidebar">
         <div class="brand" data-tauri-drag-region>
-          <span id="brand-mark"></span>
-          <div class="brand-type">
-            <span class="brand-name">HOUSTON</span>
-            <span class="brand-sub">mission control</span>
-          </div>
+          <button id="home-link" class="brand-link" title="Home (⇧⌘H)" aria-label="Home">
+            <span id="brand-mark"></span>
+            <span class="brand-type">
+              <span class="brand-name">HOUSTON</span>
+              <span class="brand-sub">mission control</span>
+            </span>
+          </button>
         </div>
         <div id="projects"></div>
         <div class="sidebar-foot">
@@ -61,9 +63,12 @@
       </aside>
       <main>
         <header id="topbar" data-tauri-drag-region>
-          <div id="crumbs" data-tauri-drag-region></div>
+          <div class="topbar-left" data-tauri-drag-region>
+            <button id="toggle-sidebar" class="icon-btn" data-icon="sidebar" title="Toggle sidebar (⌘B)" aria-label="Toggle sidebar"></button>
+            <div id="crumbs" data-tauri-drag-region></div>
+          </div>
           <div class="actions">
-            <button id="waiting-pill" class="hidden" title="Jump to next waiting session (⌘J)"></button>
+            <button id="waiting-pill" class="hidden" title="Review waiting sessions (⌘I) · next waiting (⌘J)"></button>
             <button id="new-claude" class="btn-claude" data-icon="agent">Claude <kbd>⌘N</kbd></button>
             <button id="new-shell" data-icon="shell">Shell <kbd>⌘T</kbd></button>
             <div class="seg">
@@ -147,6 +152,7 @@
           </div>
           <section id="stage" class="stage"></section>
           <nav id="dock" class="dock hidden" aria-label="Collapsed sessions"></nav>
+          <section id="home" class="home hidden" aria-label="Home"></section>
         </div>
       </main>
     </div>

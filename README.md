@@ -44,6 +44,11 @@ telemetry and calls you back when an agent lands or needs a decision.
 | **Changes** | Projects with uncommitted work show a `+2 ~5 ?1` badge; click it (or `⌘D`) for a file-by-file diff. |
 | **Find & palette** | `⌘F` searches a terminal's scrollback; `⌘P` jumps to any session, project action or command. |
 | **Alias launchpad** | `⌘⇧P` lists the aliases in your `.zshrc`. Pick one to open it in a fresh shell (handy for `ssh` hops), or add, edit and delete aliases without leaving the app. |
+| **Approval inbox** | `⌘I` lists every agent waiting on you. Answer permission dialogs (Approve / Deny, or "Approve all safe" for read-only tools) and type quick replies without leaving the list. |
+| **Mission timeline** | `⌘E` shows what an agent did, read from its Claude Code transcript: prompts, edits, commands, reads and replies, with a minimap and a scrubber. |
+| **Conflict radar** | Two live agents that changed the same file within 30 minutes get a warning badge in the sidebar and pane header, plus a notification. |
+| **Smart notifications** | Houston only interrupts when an agent is waiting, a long shell command fails or a process crashes. `Send cost digest` in the palette summarises spend. |
+| **Remote glance** | Opt-in from the palette: a read-only status page on your local network (secret link, copied to the clipboard) to check the fleet from a phone. |
 | **Mission patches** | Each project gets its own colour, used in the sidebar, the pane header, the diff panel and the palette. Fold projects you're not working on. |
 | **Project actions** | Right-click a project to open it in your editor or Finder, run an npm script, or open a pull request. |
 
@@ -62,12 +67,13 @@ agents, an ink prompt for shells.
 | `⌘O` | add project | | `⌘G` | toggle grid / focus |
 | `⌘N` | new Claude agent (with brief) | | `⌘\` | toggle split view |
 | `⌘T` | new shell | | `⌘1`–`⌘9` | jump to session |
-| `⌘W` | close session | | `⌘[` / `⌘]` | previous / next session |
+| `⌘W` | terminate session | | `⌘[` / `⌘]` | previous / next session |
 | `⌘R` / `⏎` | relaunch an exited session | | `⌘K` | clear terminal |
 | `⌘J` | next waiting session | | `⇧⏎` | newline in Claude's prompt |
 | `⌘⇧R` | rename session | | `⌘B` | toggle sidebar |
 | `⌘P` | command palette | | `⌘F` | find in terminal |
 | `⌘⇧P` | aliases | | `⌘D` | show uncommitted changes |
+| | | | `⌘I` / `⌘E` | approval inbox / mission timeline |
 
 ## Launch sequence
 

@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod activity;
 mod aliases;
 mod limits;
 mod pty;
+mod remote;
 mod shell;
 
 use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
@@ -79,6 +81,11 @@ fn main() {
             limits::claude_status_line,
             limits::claude_limits,
             limits::claude_session_stats,
+            activity::claude_timeline,
+            activity::claude_edits,
+            remote::remote_start,
+            remote::remote_stop,
+            remote::remote_update,
             aliases::list_aliases,
             aliases::save_alias,
             aliases::delete_alias,

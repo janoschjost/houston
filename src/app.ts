@@ -1,12 +1,14 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ask, open } from "@tauri-apps/plugin-dialog";
+import { ask, message, open } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { AliasPalette } from "./aliases";
-import { api, type GitStatus, type LimitWindow, type RateLimits, type ShellInfo } from "./api";
+import { api, type FileEdit, type GitStatus, type LimitWindow, type RateLimits, type ShellInfo } from "./api";
 import { Completer } from "./completion";
 import { DiffPanel } from "./diff";
+import { InboxPanel, type InboxItem } from "./inbox";
 import { fillIcons, icon, light, mark } from "./icons";
 import { BriefDialog, CommandPalette, ContextMenu, type Command, type MenuItem } from "./palette";
+import { TimelinePanel } from "./timeline";
 import { STATUS_LABEL, Session, currentProjectColor, nextProjectColor, shellQuote, shortPath, type Kind, type ProjectRec, type SessionRec } from "./session";
 
 /** Split shows two sessions side by side. */
@@ -42,6 +44,8 @@ interface Persisted {
   gridProject?: string;
   /** Resized track sizes per layout shape, e.g. "grid:3x2". */
   tracks?: Record<string, Tracks>;
+  /** The remote status page was switched on. */
+  remote?: boolean;
 }
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
@@ -69,6 +73,9 @@ function gridColumns(n: number, width: number, height: number) {
   }
   return best;
 }
+
+/** How recently two agents must both have changed a file for it to count as an overlap, in milliseconds. */
+const OVERLAP_WINDOW = 30 * 60_000;
 
 /** Editor CLIs offered for "Open in …", in order of preference. */
 const EDITORS = ["cursor", "code", "zed", "subl"];
@@ -121,6 +128,21 @@ function renderLimits(limits: RateLimits | null) {
   return windows.map(([label, w]) => renderTank(label, w)).join("");
 }
 
+/** Context use of a Claude session as a rounded percent and its warning tier; empty until reported. */
+function ctxTier(s: Session) {
+  const pct = s.stats?.context_percent;
+  return pct == null ? "" : `${Math.round(pct)}${pct >= 85 ? "h" : pct >= 60 ? "m" : "l"}`;
+}
+
+/** Thin bar under a sidebar row showing how full the session's context is. */
+function ctxBar(s: Session) {
+  const pct = s.stats?.context_percent;
+  if (pct == null) return "";
+  return `<i class="sess-ctx" data-tier="${pct >= 85 ? "high" : pct >= 60 ? "mid" : "low"}" style="width: ${Math.min(100, Math.round(pct))}%" title="Context ${Math.round(pct)}% used"></i>`;
+}
+
+const overlapTitle = (s: Session) => `Also changed by another agent:\n${s.overlaps.map((o) => `${o.path.split("/").pop()} ↔ ${o.with}`).join("\n")}`;
+
 /** Faint flight-dynamics backdrop behind the splash: orbit plot plus corner readouts. */
 const HUD = (projects: number) => `<div class="hud" aria-hidden="true">
   <svg viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid slice">
@@ -141,6 +163,18 @@ const HUD = (projects: number) => `<div class="hud" aria-hidden="true">
   <div class="hud-corner br">PROJECTS ${String(projects).padStart(2, "0")}<br>SESSIONS 00<br>LINK     NOMINAL</div>
 </div>`;
 
+/** Shortcut cheat-sheet on the home screen. */
+const HOME_KEYS: [string, string][] = [
+  ["⇧⌘H", "home"], ["⌘O", "add project"],
+  ["⌘N", "new Claude session"], ["⌘T", "open shell"],
+  ["⌘G", "grid / focus"], ["⌘1-9", "jump to session"],
+  ["⌘W", "terminate session"], ["⌘J", "next waiting"],
+  ["⌘B", "toggle sidebar"], ["⌘P", "command palette"],
+  ["⌘\\", "split view"], ["⌘F", "find in terminal"],
+  ["⌘D", "show changes"], ["⌘I", "approval inbox"],
+  ["⌘E", "mission timeline"], ["⇧⌘P", "aliases / servers"],
+];
+
 export class App {
   private projects: ProjectRec[] = [];
   private sessions: Session[] = [];
@@ -148,6 +182,9 @@ export class App {
   /** Project that "new session" targets when nothing is selected in it. */
   private activeProjectId?: string;
   private layout: Layout = "focus";
+  /** The home screen covers the stage; it also shows by itself while there are no sessions. */
+  private home = false;
+  private homeHtml = "";
   private sidebarHidden = false;
   private sidebarWidth?: number;
   private completer = new Completer();
@@ -169,6 +206,14 @@ export class App {
   /** Shape key and sizes of the tiled layout on screen. */
   private shape = { key: "", tracks: { cols: [1], rows: [1] } as Tracks };
   private projectGit = new Map<string, GitStatus | null>();
+  /** Session ids, most recently selected first, for ordering the palette. */
+  private recent: string[] = [];
+  private limits: RateLimits | null = null;
+  /** Address of the remote status page while it is on. */
+  private remoteUrl?: string;
+  private lastSnapshot = 0;
+  /** Overlaps already announced, so each is notified once. */
+  private overlapSeen = new Set<string>();
   private aliases = new AliasPalette({
     connect: (alias) => this.newSession("shell", undefined, { name: alias.name, command: alias.name }),
     defined: (name) => this.completer.addCommand(name),
@@ -177,14 +222,24 @@ export class App {
   private brief = new BriefDialog();
   private diff = new DiffPanel(() => this.selected?.focus());
   private menu = new ContextMenu();
+  private timeline = new TimelinePanel(() => this.selected?.focus());
+  private inbox = new InboxPanel(
+    {
+      approve: (id) => this.answer(id, (s) => s.approve()),
+      deny: (id) => this.answer(id, (s) => s.deny()),
+      reply: (id, text) => this.answer(id, (s) => s.reply(text)),
+      open: (id) => this.select(id),
+    },
+    () => this.selected?.focus(),
+  );
 
   constructor(private shell: ShellInfo) {
     this.completer.load(shell);
-    document.body.append(this.aliases.el, this.palette.el, this.brief.el, this.diff.el, this.menu.el);
+    document.body.append(this.aliases.el, this.palette.el, this.brief.el, this.diff.el, this.timeline.el, this.inbox.el, this.menu.el);
   }
 
   private get overlayOpen() {
-    return this.aliases.isOpen || this.palette.isOpen || this.brief.isOpen || this.diff.isOpen;
+    return this.aliases.isOpen || this.palette.isOpen || this.brief.isOpen || this.diff.isOpen || this.timeline.isOpen || this.inbox.isOpen;
   }
 
   async start() {
@@ -218,6 +273,7 @@ export class App {
     this.pollUsage();
     setInterval(() => this.pollUsage(), 5_000);
     this.notifyAllowed = (await isPermissionGranted()) || (await requestPermission()) === "granted";
+    if (saved?.remote) void this.startRemote(false);
   }
 
   // ── state ────────────────────────────────────────────────────────────
@@ -233,6 +289,14 @@ export class App {
       changed: () => this.renderSidebar(),
       persist: () => this.save(),
       isSelected: (s) => s.rec.id === this.selectedId,
+      failed: (s, command, code) => {
+        if (this.watching(s)) return;
+        this.notify(`${s.rec.name} · ${s.project.name}`, `failed (exit ${code}): ${command}`);
+      },
+      exited: (s, code) => {
+        if (code === null || code === 0 || this.watching(s)) return;
+        this.notify(`${s.rec.name} · ${s.project.name}`, `exited with code ${code}`);
+      },
     });
   }
 
@@ -256,6 +320,7 @@ export class App {
         split: this.splitIds,
         gridProject: this.gridProjectId,
         tracks: this.tracks,
+        remote: !!this.remoteUrl,
       };
       api.saveState(state).catch((e) => console.error("save failed", e));
     }, 300);
@@ -319,6 +384,7 @@ export class App {
   }
 
   private select(id: string | undefined) {
+    this.home = false;
     if (id !== this.selectedId) this.prevSelectedId = this.selectedId;
     // In split view the newly selected session takes the place of the one that had focus.
     if (this.layout === "split" && id && !this.splitIds.includes(id)) {
@@ -326,6 +392,7 @@ export class App {
       this.splitIds[slot < 0 ? 1 : slot] = id;
     }
     this.selectedId = id;
+    if (id) this.recent = [id, ...this.recent.filter((r) => r !== id)];
     const s = this.selected;
     // A project grid follows the selection to its project.
     if (s && this.gridProjectId) this.gridProjectId = s.project.id;
@@ -459,13 +526,17 @@ export class App {
 
   /**
    * Drops a session on a pane of the stage. In focus view it splits the shown session with it; in split view it
-   * is inserted before/after the pane (or takes its place, swapping if it already shows); in a grid it reorders.
+   * is inserted before/after the pane (or takes its place, swapping if it already shows); in a grid it swaps places.
    */
   private dropOnStage(s: Session, target: Session, mode: "before" | "after" | "replace") {
     if (this.layout === "grid") {
-      if (mode === "replace" || target.project !== s.project) return;
+      if (target.project !== s.project) return;
       s.rec.collapsed = false;
-      this.moveSession(s, target, mode === "after");
+      if (mode === "replace") {
+        const [a, b] = [this.sessions.indexOf(s), this.sessions.indexOf(target)];
+        [this.sessions[a], this.sessions[b]] = [target, s];
+        this.save();
+      } else this.moveSession(s, target, mode === "after");
       return this.select(s.rec.id);
     }
     const ids = this.layout === "split" ? this.splitIds.filter((id) => this.sessions.some((x) => x.rec.id === id)) : [target.rec.id];
@@ -518,6 +589,30 @@ export class App {
 
   /** `project` limits the grid to that project's sessions. */
   private setLayout(layout: Layout, project?: ProjectRec) {
+    this.home = false;
+    this.flip(() => this.applyLayout(layout, project));
+  }
+
+  /** Runs a layout change and glides every pane from its old rectangle to its new one (FLIP). */
+  private flip(change: () => void) {
+    const panes = () => [...document.querySelectorAll<HTMLElement>("#stage > .pane")];
+    const before = new Map(panes().map((p) => [p.dataset.id!, p.getBoundingClientRect()]));
+    change();
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const timing = { duration: 240, easing: "cubic-bezier(.3, .7, .2, 1)" };
+    for (const p of panes()) {
+      const from = before.get(p.dataset.id!);
+      const to = p.getBoundingClientRect();
+      if (!from) {
+        p.animate([{ opacity: 0, transform: "scale(.97)" }, { opacity: 1, transform: "none" }], timing);
+      } else if (Math.abs(from.left - to.left) + Math.abs(from.top - to.top) + Math.abs(from.width - to.width) + Math.abs(from.height - to.height) > 1) {
+        const move = `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`;
+        p.animate([{ transform: move, transformOrigin: "top left" }, { transform: "none", transformOrigin: "top left" }], timing);
+      }
+    }
+  }
+
+  private applyLayout(layout: Layout, project?: ProjectRec) {
     this.layout = layout;
     this.gridProjectId = layout === "grid" ? project?.id : undefined;
     if (project && this.selected?.project !== project) {
@@ -529,14 +624,24 @@ export class App {
     this.save();
   }
 
+  /** True while the user is looking at the session: the app has focus and the session is on stage. */
+  private watching(s: Session) {
+    return document.hasFocus() && !this.homeShown && this.visibleSessions().includes(s);
+  }
+
+  /** Native notification, when allowed. Only things that need the user get here: a session waiting, or a failure. */
+  private notify(title: string, body: string) {
+    if (this.notifyAllowed) sendNotification({ title, body });
+  }
+
   private tick() {
     const now = performance.now();
     const appFocused = document.hasFocus();
-    const visible = this.visibleSessions();
+    const visible = this.homeShown ? [] : this.visibleSessions();
     for (const s of this.sessions) {
-      if (s.tick(now, appFocused && visible.includes(s)) && !appFocused && this.notifyAllowed) {
-        const what = s.rec.kind === "claude" ? "is awaiting input" : `finished: ${s.runningCommand || "command"}`;
-        sendNotification({ title: `${s.rec.name} · ${s.project.name}`, body: s.waitingFor || `${s.rec.name} ${what}` });
+      // A finished shell command is not worth an interruption (a failing one is, see `failed`); a waiting agent is.
+      if (s.tick(now, appFocused && visible.includes(s)) && !appFocused && s.rec.kind === "claude") {
+        this.notify(`${s.rec.name} · ${s.project.name}`, s.permission ? `needs approval: ${s.waitingFor}` : s.waitingFor || `${s.rec.name} is awaiting input`);
       }
     }
     const waiting = this.sessions.filter((s) => s.status === "attention").length;
@@ -551,6 +656,117 @@ export class App {
     this.renderSidebar();
     this.renderCrumbs();
     this.renderDock();
+    if (this.inbox.isOpen) this.inbox.update(this.inboxItems(), this.digest());
+    if (this.remoteUrl && Date.now() - this.lastSnapshot > 2000) this.pushSnapshot();
+  }
+
+  // ── inbox, timeline, remote ──────────────────────────────────────────
+
+  /** Sessions that need the user: parked after finishing, or showing a permission dialog right now. */
+  private inboxItems(): InboxItem[] {
+    return this.sessions
+      .filter((s) => s.status === "attention" || (s.permission && s.status !== "exited"))
+      .map((s) => ({
+        id: s.rec.id,
+        name: s.rec.name,
+        project: s.project.name,
+        color: s.project.color,
+        kind: s.rec.kind,
+        status: s.status,
+        waitingFor: s.waitingFor,
+        permission: s.permission,
+      }));
+  }
+
+  /** One line on what the fleet has cost so far, from Claude Code's reported session totals. */
+  private digest() {
+    const spent = this.sessions.filter((s) => s.stats?.cost_usd != null);
+    const total = spent.reduce((sum, s) => sum + (s.stats?.cost_usd ?? 0), 0);
+    const w = this.limits?.five_hour;
+    return `$${total.toFixed(2)} across ${spent.length} agent${spent.length === 1 ? "" : "s"}${w ? ` · 5h limit ${fuelLeft(w)}% left` : ""}`;
+  }
+
+  /** Runs an answer on a session from the inbox and refreshes the list. */
+  private answer(id: string, act: (s: Session) => void) {
+    const s = this.sessions.find((x) => x.rec.id === id);
+    if (!s) return;
+    act(s);
+    s.needsAttention = false;
+    s.permission = null;
+    s.waitingFor = "";
+    this.inbox.update(this.inboxItems(), this.digest());
+  }
+
+  private openInbox() {
+    this.inbox.open(this.inboxItems(), this.digest());
+  }
+
+  private openTimeline(s = this.selected) {
+    if (!s?.rec.claudeId) return;
+    this.timeline.open(s.rec.name, s.project.color, s.project.path, s.rec.claudeId);
+  }
+
+  private sendDigest() {
+    const top = this.sessions
+      .filter((s) => s.stats?.cost_usd != null)
+      .sort((a, b) => (b.stats!.cost_usd ?? 0) - (a.stats!.cost_usd ?? 0))
+      .slice(0, 3)
+      .map((s) => `${s.rec.name} $${s.stats!.cost_usd!.toFixed(2)}`)
+      .join(" · ");
+    this.notify("Houston cost digest", `${this.digest()}${top ? `\n${top}` : ""}`);
+  }
+
+  private async toggleRemote() {
+    if (this.remoteUrl) {
+      await api.remoteStop().catch(() => {});
+      this.remoteUrl = undefined;
+      this.save();
+      this.sidebarKey = "";
+      this.renderSidebar();
+      return void message("Remote glance is off.", { title: "Houston" });
+    }
+    await this.startRemote(true);
+  }
+
+  private async startRemote(announce: boolean) {
+    try {
+      this.remoteUrl = (await api.remoteStart()).url;
+    } catch (err) {
+      return void message(`Could not start the status page: ${err}`, { title: "Houston", kind: "error" });
+    }
+    this.save();
+    this.pushSnapshot();
+    this.sidebarKey = "";
+    this.renderSidebar();
+    if (!announce) return;
+    await navigator.clipboard.writeText(this.remoteUrl).catch(() => {});
+    await message(
+      `${this.remoteUrl}\n\nCopied to your clipboard. Open it on a phone on the same network.\n\nAnyone with this link can see session names, status and the last question each agent asked (read-only). Turn it off from the palette.`,
+      { title: "Remote glance", kind: "info" },
+    );
+  }
+
+  /** Fleet state for the remote page. */
+  private pushSnapshot() {
+    this.lastSnapshot = Date.now();
+    const l = this.limits;
+    const limits = [l?.five_hour && `5h limit ${fuelLeft(l.five_hour)}% left`, l?.seven_day && `week ${fuelLeft(l.seven_day)}% left`].filter(Boolean).join(" · ");
+    const snapshot = {
+      updated: this.lastSnapshot,
+      waiting: this.sessions.filter((s) => s.status === "attention").length,
+      working: this.sessions.filter((s) => s.status === "working").length,
+      cost: this.sessions.reduce((sum, s) => sum + (s.stats?.cost_usd ?? 0), 0),
+      limits,
+      sessions: this.sessions.map((s) => ({
+        name: s.rec.name,
+        project: s.project.name,
+        color: s.project.color,
+        status: s.status,
+        waitingFor: s.waitingFor,
+        ctx: s.stats?.context_percent ?? null,
+      })),
+    };
+    api.remoteUpdate(JSON.stringify(snapshot)).catch(() => {});
   }
 
   // ── rendering ────────────────────────────────────────────────────────
@@ -559,6 +775,7 @@ export class App {
     this.sidebarKey = "";
     this.renderSidebar();
     this.renderStage();
+    this.renderHome();
     this.renderCrumbs();
     this.renderDock();
   }
@@ -569,16 +786,20 @@ export class App {
       this.projects.map((p) => [p.id, p.collapsed]),
       this.activeProjectId,
       this.selectedId,
-      this.sessions.map((s) => [s.rec.name, s.status, s.title, s.cwd, s.runningCommand, s.waitingFor]),
+      this.sessions.map((s) => [s.rec.name, s.status, s.title, s.cwd, s.runningCommand, s.waitingFor, ctxTier(s), s.overlaps.length]),
       this.projects.map((p) => gitBadge(this.projectGit.get(p.id))),
+      !!this.remoteUrl,
     ]);
     if (key === this.sidebarKey || this.renaming || this.reordering) return;
     this.sidebarKey = key;
+    this.renderHome();
 
     const html = this.projects
       .map((p) => {
         const mine = this.sessions.filter((s) => s.project.id === p.id);
-        const rows = mine
+        // Sessions that need the user float to the top of their project; shortcut numbers keep the real order.
+        const rows = [...mine]
+          .sort((a, b) => Number(b.status === "attention") - Number(a.status === "attention"))
           .map((s) => {
             const index = this.sessions.indexOf(s) + 1;
             const status = STATUS_LABEL[s.status];
@@ -589,7 +810,7 @@ export class App {
             return `<div class="sess${s.rec.id === this.selectedId ? " sel" : ""}" data-status="${s.status}" data-select="${s.rec.id}">
               ${light(s.rec.kind, `${s.rec.kind === "claude" ? "Claude" : "Shell"} · ${status}`)}
               <div class="sess-body">
-                <div class="sess-line"><span class="sess-name" data-rename="${s.rec.id}">${escapeHtml(s.rec.name)}</span></div>
+                <div class="sess-line"><span class="sess-name" data-rename="${s.rec.id}">${escapeHtml(s.rec.name)}</span>${s.overlaps.length ? `<span class="sess-warn" title="${escapeHtml(overlapTitle(s))}">${icon("warn")}${s.overlaps.length}</span>` : ""}</div>
                 <div class="sess-sub" title="${escapeHtml(sub)}">${escapeHtml(sub)}</div>
               </div>
               <div class="sess-tail">
@@ -598,19 +819,21 @@ export class App {
                   <button class="sess-close" data-close="${s.rec.id}" title="Close session">${icon("close")}</button>
                 </span>
               </div>
+              ${ctxBar(s)}
             </div>`;
           })
           .join("");
         const waiting = mine.filter((s) => s.status === "attention").length;
         const summary = `${mine.length} session${mine.length === 1 ? "" : "s"}${waiting ? ` · ${waiting} waiting` : ""}`;
         const badge = gitBadge(this.projectGit.get(p.id));
-        return `<section class="proj${p.id === this.activeProjectId ? " active" : ""}${p.collapsed ? " collapsed" : ""}" style="--proj: ${p.color}">
+        return `<section class="proj${p.id === this.activeProjectId ? " active" : ""}${p.collapsed ? " collapsed" : ""}${waiting ? " has-waiting" : ""}" style="--proj: ${p.color}">
           <div class="proj-head" data-project="${p.id}">
             <button class="proj-toggle" data-collapse="${p.id}" title="${p.collapsed ? "Expand" : "Collapse"}" aria-expanded="${!p.collapsed}">${icon("chevron")}</button>
             <div class="proj-title">
               <span class="proj-name">${escapeHtml(p.name)}</span>
               ${p.collapsed ? `<span class="proj-path proj-summary${waiting ? " waiting" : ""}">${summary}</span>` : `<span class="proj-path" title="${escapeHtml(p.path)}">${escapeHtml(shortPath(p.path, home))}</span>`}
             </div>
+            ${waiting && !p.collapsed ? `<span class="proj-wait" title="${waiting} waiting">${waiting}</span>` : ""}
             ${badge ? `<button class="proj-git" data-diff="${p.id}" title="Show uncommitted changes (⌘D)">${badge}</button>` : ""}
             <span class="proj-actions">
               ${mine.length ? `<button data-grid="${p.id}" title="Open in grid">${icon("grid")}</button>` : ""}
@@ -631,35 +854,158 @@ export class App {
         const label = `${n} ${STATUS_LABEL[st].toLowerCase()}`;
         return n ? `<span data-status="${st}" title="${label}" aria-label="${label}">${light()}${n}</span>` : "";
       })
-      .join("");
+      .join("") + (this.remoteUrl ? `<span class="t-remote" title="Remote glance is on">${icon("remote")}remote</span>` : "");
   }
 
   /** Remaining plan usage per window, refreshed from what Claude Code last reported. */
   private async pollLimits() {
     const limits = await api.claudeLimits().catch(() => null);
+    this.limits = limits;
     $("#limits").innerHTML = renderLimits(limits);
   }
 
-  /** Refreshes each project's uncommitted changes and each Claude session's cost and context use. */
+  /** Refreshes each project's uncommitted changes, each Claude session's cost and context use, and file overlaps. */
   private async pollUsage() {
     const ids = this.sessions.flatMap((s) => (s.rec.claudeId ? [s.rec.claudeId] : []));
-    const [stats] = await Promise.all([
+    const live = this.sessions.filter((s) => s.rec.claudeId && s.status !== "exited" && s.status !== "dormant");
+    const [stats, edits] = await Promise.all([
       ids.length ? api.claudeSessionStats(ids).catch(() => ({})) : {},
+      live.length ? api.claudeEdits(live.map((s) => s.rec.claudeId!)).catch(() => ({})) : {},
       ...this.projects.map(async (p) => this.projectGit.set(p.id, await api.gitStatus(p.path).catch(() => null))),
     ]);
     for (const s of this.sessions) {
       const next = s.rec.claudeId ? (stats as Record<string, Session["stats"]>)[s.rec.claudeId] : undefined;
-      if (next) {
-        s.stats = next;
-        s.render();
-      }
+      if (next) s.stats = next;
+      s.projectGit = this.projectGit.get(s.project.id) ?? null;
+      s.render();
     }
+    this.findOverlaps(live, edits as Record<string, FileEdit[]>);
     this.renderSidebar();
   }
 
+  /** Conflict radar: files that two live agents both changed lately. */
+  private findOverlaps(live: Session[], edits: Record<string, FileEdit[]>) {
+    const cutoff = Date.now() - OVERLAP_WINDOW;
+    const touched = new Map<string, Session[]>();
+    for (const s of live) {
+      for (const e of edits[s.rec.claudeId!] ?? []) {
+        if (!(Date.parse(e.ts) > cutoff)) continue;
+        const list = touched.get(e.path) ?? [];
+        if (!list.includes(s)) list.push(s);
+        touched.set(e.path, list);
+      }
+    }
+    for (const s of this.sessions) s.overlaps = [];
+    const current = new Set<string>();
+    for (const [path, list] of touched) {
+      if (list.length < 2) continue;
+      for (const s of list) s.overlaps.push({ path, with: list.filter((o) => o !== s).map((o) => o.rec.name).join(", ") });
+      const key = `${path}|${list.map((s) => s.rec.id).sort().join(",")}`;
+      current.add(key);
+      if (!this.overlapSeen.has(key) && !document.hasFocus()) {
+        this.notify(`Overlap in ${list[0].project.name}`, `${list.map((s) => s.rec.name).join(" and ")} both changed ${path.split("/").pop()}`);
+      }
+    }
+    this.overlapSeen = current;
+    for (const s of live) s.render();
+  }
+
+  private get homeShown() {
+    return this.home || !this.sessions.length;
+  }
+
+  private showHome() {
+    this.home = true;
+    (document.activeElement as HTMLElement | null)?.blur();
+    this.renderHome();
+    this.renderCrumbs();
+  }
+
+  private homeClick(e: MouseEvent) {
+    const t = e.target as HTMLElement;
+    const data = (attr: string) => t.closest<HTMLElement>(`[${attr}]`)?.getAttribute(attr) ?? undefined;
+    if (data("data-select")) return this.select(data("data-select"));
+    const kind = data("data-new");
+    if (kind === "claude") return this.newAgent(data("data-pid"));
+    if (kind) return this.newSession(kind as Kind, data("data-pid"));
+    const changed = this.projects.find((p) => p.id === data("data-diff"));
+    if (changed) return this.showChanges(changed);
+    if (data("data-act") === "add-project") return this.addProject();
+    if (data("data-act") === "inbox") return this.openInbox();
+  }
+
+  /** The landing screen: what needs you, every project with its sessions, and what you touched last. */
+  private renderHome() {
+    const el = $("#home");
+    const shown = this.homeShown;
+    el.classList.toggle("hidden", !shown);
+    this.syncBackdrop();
+    if (!shown) return;
+    const home = this.shell.home;
+    const sub = (s: Session) =>
+      s.status === "attention" && s.waitingFor
+        ? s.waitingFor
+        : s.rec.kind === "claude" ? (!s.rec.autoName && s.title) || "claude code" : s.runningCommand ? `⟫ ${s.runningCommand}` : shortPath(s.cwd, home);
+    const row = (s: Session, withProject: boolean) => `<button class="home-row" data-status="${s.status}" data-select="${s.rec.id}" style="--proj: ${s.project.color}">
+      ${light(s.rec.kind, `${s.rec.kind === "claude" ? "Claude" : "Shell"} · ${STATUS_LABEL[s.status]}`)}
+      <span class="home-row-name">${escapeHtml(s.rec.name)}</span>
+      ${withProject ? `<span class="home-row-proj">${escapeHtml(s.project.name)}</span>` : ""}
+      <span class="home-row-sub">${escapeHtml(sub(s))}</span>
+    </button>`;
+
+    const count = (st: Session["status"]) => this.sessions.filter((s) => s.status === st).length;
+    const stats = (["working", "attention", "idle", "exited"] as const)
+      .map((st) => `<div class="home-stat" data-status="${st}">${light()}<b>${count(st)}</b><span>${STATUS_LABEL[st]}</span></div>`)
+      .join("");
+
+    const waiting = this.sessions.filter((s) => s.status === "attention");
+    const recent = this.recent
+      .map((id) => this.sessions.find((s) => s.rec.id === id))
+      .filter((s): s is Session => !!s && s.status !== "attention")
+      .slice(0, 5);
+
+    const projects = this.projects
+      .map((p) => {
+        const mine = this.sessions.filter((s) => s.project.id === p.id);
+        const badge = gitBadge(this.projectGit.get(p.id));
+        const chips = mine
+          .map((s) => `<button class="home-chip" data-status="${s.status}" data-select="${s.rec.id}" title="${escapeHtml(sub(s))}">${light(s.rec.kind, STATUS_LABEL[s.status])}${escapeHtml(s.rec.name)}</button>`)
+          .join("");
+        return `<article class="home-proj" style="--proj: ${p.color}">
+          <div class="home-proj-head">
+            <div class="home-proj-title"><span class="home-proj-name">${escapeHtml(p.name)}</span><span class="home-proj-path" title="${escapeHtml(p.path)}">${escapeHtml(shortPath(p.path, home))}</span></div>
+            ${badge ? `<button class="proj-git" data-diff="${p.id}" title="Show uncommitted changes (⌘D)">${badge}</button>` : ""}
+          </div>
+          <div class="home-chips">${chips || `<span class="home-none">no sessions</span>`}</div>
+          <div class="home-proj-foot">
+            <button data-new="claude" data-pid="${p.id}" class="btn-claude">${icon("agent")}Claude</button>
+            <button data-new="shell" data-pid="${p.id}">${icon("shell")}Shell</button>
+          </div>
+        </article>`;
+      })
+      .join("");
+
+    const html = `<div class="home-inner">
+      <header class="home-head">${mark()}<div class="home-name">Houston</div><div class="home-sub">Mission control for Claude Code · v0.1</div></header>
+      ${this.sessions.length ? `<div class="home-stats">${stats}</div>` : ""}
+      ${waiting.length ? `<section class="home-sec home-wait"><h2>Needs you <button data-act="inbox" class="home-link">Approval inbox <kbd>⌘I</kbd></button></h2>${waiting.map((s) => row(s, true)).join("")}</section>` : ""}
+      <section class="home-sec"><h2>Projects <button data-act="add-project" class="home-link">${icon("project")}Add project <kbd>⌘O</kbd></button></h2>
+        ${projects ? `<div class="home-projs">${projects}</div>` : `<p class="home-none">No projects yet. Add a folder to start a mission.</p>`}
+      </section>
+      ${recent.length ? `<section class="home-sec"><h2>Jump back in</h2>${recent.map((s) => row(s, true)).join("")}</section>` : ""}
+      <section class="home-sec"><h2>Shortcuts</h2><div class="splash-keys">${HOME_KEYS.map(([k, d]) => `<div><kbd>${k}</kbd> ${d}</div>`).join("")}</div></section>
+    </div>`;
+    if (html !== this.homeHtml) {
+      this.homeHtml = html;
+      el.innerHTML = html;
+    }
+  }
+
   private renderCrumbs() {
-    const s = this.selected;
-    const html = s
+    const s = this.homeShown ? undefined : this.selected;
+    const html = this.homeShown
+      ? `<span class="c-sess">Home</span>`
+      : s
       ? `<span class="c-proj" style="--proj: ${s.project.color}">${escapeHtml(s.project.name)}</span> <span class="c-dim">/</span> <span class="c-sess">${escapeHtml(s.rec.name)}</span> <span class="c-dim c-path">${escapeHtml(shortPath(s.cwd, this.shell.home))}</span>`
       : `<span class="c-dim">No active mission</span>`;
     const el = $("#crumbs");
@@ -677,25 +1023,25 @@ export class App {
     el.classList.toggle("hidden", !docked.length);
   }
 
+  /** The blueprint backdrop shows on the home screen and the empty stage; behind terminals it is reduced to the bare grid. */
+  private syncBackdrop() {
+    const wrap = $(".stage-wrap");
+    wrap.classList.toggle("has-panes", this.sessions.length > 0);
+    wrap.classList.toggle("home-up", this.homeShown);
+    const calm = (this.sessions.length > 0 && !this.homeShown) || matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.querySelectorAll<SVGSVGElement>("#backdrop svg").forEach((svg) => (calm ? svg.pauseAnimations() : svg.unpauseAnimations()));
+  }
+
   private renderStage() {
     const stage = $("#stage");
     document.querySelectorAll<HTMLElement>("[data-layout]").forEach((b) => b.classList.toggle("on", b.dataset.layout === this.layout));
+    this.syncBackdrop();
     if (!this.sessions.length) {
       stage.className = "stage empty";
-      stage.innerHTML = `${HUD(this.projects.length)}<div class="splash">${mark()}<div class="splash-name">Houston</div>
-        <div class="splash-sub">Mission control for Claude Code · v0.1</div>
-        <div class="splash-keys">
-          <div><kbd>⌘O</kbd> add project</div><div><kbd>⌘N</kbd> new Claude session</div>
-          <div><kbd>⌘T</kbd> open shell</div><div><kbd>⌘G</kbd> grid / focus</div>
-          <div><kbd>⌘1-9</kbd> jump to session</div><div><kbd>⌘W</kbd> close session</div>
-          <div><kbd>⌘J</kbd> next waiting</div><div><kbd>⌘B</kbd> toggle sidebar</div>
-          <div><kbd>⌘P</kbd> command palette</div><div><kbd>⌘\\</kbd> split view</div>
-          <div><kbd>⌘F</kbd> find in terminal</div><div><kbd>⌘D</kbd> show changes</div>
-          <div><kbd>⌘⇧P</kbd> aliases / servers</div>
-        </div></div>`;
+      stage.innerHTML = HUD(this.projects.length);
       return;
     }
-    stage.querySelectorAll(".splash, .hud").forEach((el) => el.remove());
+    stage.querySelectorAll(".hud").forEach((el) => el.remove());
     const visible = this.visibleSessions();
     // Split is a two-pane grid and shares its styling.
     stage.className = `stage ${this.layout === "focus" ? "focus" : `grid${this.layout === "split" ? " split" : ""}`}`;
@@ -891,6 +1237,7 @@ export class App {
   private stageZone(ev: PointerEvent, pane: HTMLElement) {
     const r = pane.getBoundingClientRect();
     const f = (ev.clientX - r.left) / r.width;
+    if (this.layout === "grid") return "replace";
     if (this.layout === "split" && f >= 0.3 && f <= 0.7) return "replace";
     return f < 0.5 ? "before" : "after";
   }
@@ -970,27 +1317,46 @@ export class App {
   }
 
   private async openPalette() {
+    // Most recently used first, the session in front of you last: the one you want is usually the one before it.
+    const rank = (s: Session) => {
+      const i = this.recent.indexOf(s.rec.id);
+      return s === this.selected ? this.recent.length + 1 : i < 0 ? this.recent.length : i;
+    };
     const commands: Command[] = [
-      ...this.sessions.map((s, i) => ({
-        label: s.rec.name,
-        detail: `${s.project.name} · ${s.rec.kind === "claude" ? "Claude" : "shell"} · ${STATUS_LABEL[s.status]}`,
-        hint: i < 9 ? `⌘${i + 1}` : undefined,
-        color: s.project.color,
-        run: () => this.select(s.rec.id),
-      })),
-      { label: "New Claude agent…", hint: "⌘N", run: () => this.newAgent() },
-      { label: "New shell", hint: "⌘T", run: () => this.newSession("shell") },
-      { label: "Add project…", hint: "⌘O", run: () => this.addProject() },
-      { label: "Find in terminal", hint: "⌘F", run: () => this.selected?.openSearch() },
-      { label: this.layout === "grid" ? "Focus view" : "Grid view", hint: "⌘G", run: () => this.setLayout(this.layout === "grid" ? "focus" : "grid") },
-      { label: this.layout === "split" ? "Leave split view" : "Split view", hint: "⌘\\", run: () => this.toggleSplit() },
-      { label: "Next waiting session", hint: "⌘J", run: () => this.nextWaiting() },
-      { label: "Toggle sidebar", hint: "⌘B", run: () => this.setSidebarHidden(!this.sidebarHidden) },
-      { label: "Aliases…", hint: "⌘⇧P", run: () => this.aliases.open() },
+      ...[...this.sessions]
+        .sort((a, b) => rank(a) - rank(b))
+        .map((s) => {
+          const i = this.sessions.indexOf(s);
+          return {
+            label: s.rec.name,
+            detail: `${s.project.name} · ${STATUS_LABEL[s.status]}${s.waitingFor ? ` · ${s.waitingFor}` : ""}`,
+            hint: i < 9 ? `⌘${i + 1}` : undefined,
+            color: s.project.color,
+            group: "Sessions",
+            session: { kind: s.rec.kind, status: s.status },
+            preview: () => s.snapshot(8),
+            run: () => this.select(s.rec.id),
+          };
+        }),
+      { group: "Actions", label: "Home", hint: "⇧⌘H", run: () => this.showHome() },
+      { group: "Actions", label: "New Claude agent…", hint: "⌘N", run: () => this.newAgent() },
+      { group: "Actions", label: "New shell", hint: "⌘T", run: () => this.newSession("shell") },
+      { group: "Actions", label: "Add project…", hint: "⌘O", run: () => this.addProject() },
+      { group: "Actions", label: "Approval inbox", detail: `${this.inboxItems().length} waiting`, hint: "⌘I", run: () => this.openInbox() },
+      { group: "Actions", label: "Mission timeline", detail: "what this agent did", hint: "⌘E", run: () => this.openTimeline() },
+      { group: "Actions", label: "Terminate session", hint: "⌘W", run: () => this.closeSession(this.selected) },
+      { group: "Actions", label: "Find in terminal", hint: "⌘F", run: () => this.selected?.openSearch() },
+      { group: "Actions", label: this.layout === "grid" ? "Focus view" : "Grid view", hint: "⌘G", run: () => this.setLayout(this.layout === "grid" ? "focus" : "grid") },
+      { group: "Actions", label: this.layout === "split" ? "Leave split view" : "Split view", hint: "⌘\\", run: () => this.toggleSplit() },
+      { group: "Actions", label: "Next waiting session", hint: "⌘J", run: () => this.nextWaiting() },
+      { group: "Actions", label: "Toggle sidebar", hint: "⌘B", run: () => this.setSidebarHidden(!this.sidebarHidden) },
+      { group: "Actions", label: "Aliases…", hint: "⌘⇧P", run: () => this.aliases.open() },
+      { group: "Actions", label: "Send cost digest", detail: this.digest(), run: () => this.sendDigest() },
+      { group: "Actions", label: this.remoteUrl ? "Remote glance: turn off" : "Remote glance: turn on…", detail: "read-only status page for your phone", run: () => this.toggleRemote() },
     ];
     const perProject = await Promise.all(this.projects.map(async (p) => ({ p, actions: await this.projectActions(p) })));
     for (const { p, actions } of perProject) {
-      for (const a of actions) if (a) commands.push({ label: a.label, detail: p.name, hint: a.hint, color: p.color, run: a.run });
+      for (const a of actions) if (a) commands.push({ group: "Projects", label: a.label, detail: p.name, hint: a.hint, color: p.color, run: a.run });
     }
     this.palette.open(commands);
   }
@@ -1000,6 +1366,9 @@ export class App {
   private bindChrome() {
     $("#brand-mark").outerHTML = mark();
     fillIcons();
+    $("#home-link").addEventListener("click", () => this.showHome());
+    $("#home").addEventListener("click", (e) => this.homeClick(e));
+    $("#toggle-sidebar").addEventListener("click", () => this.setSidebarHidden(!this.sidebarHidden));
     $("#app").classList.toggle("no-sidebar", this.sidebarHidden);
     this.setSidebarWidth(this.sidebarWidth);
     const sidebarHandle = $("#sidebar-gutter");
@@ -1008,7 +1377,7 @@ export class App {
       this.setSidebarWidth(undefined);
       this.save();
     });
-    $("#waiting-pill").addEventListener("click", () => this.nextWaiting());
+    $("#waiting-pill").addEventListener("click", () => this.openInbox());
     $("#add-project").addEventListener("click", () => this.addProject());
     $("#open-aliases").addEventListener("click", () => this.aliases.open());
     $("#new-claude").addEventListener("click", () => this.newAgent());
@@ -1045,9 +1414,10 @@ export class App {
       const named = sessionById(label?.dataset.rename);
       if (e.detail === 2 && label && named) return this.startRename(label, named);
       if (data("data-select")) return this.select(data("data-select"));
-      if (data("data-project")) {
-        this.activeProjectId = data("data-project");
-        this.renderAll();
+      const head = this.projects.find((p) => p.id === data("data-project"));
+      if (head) {
+        this.activeProjectId = head.id;
+        this.toggleCollapsed(head);
       }
     });
 
@@ -1069,6 +1439,9 @@ export class App {
       if (t.closest("[data-action=maximize]")) this.setLayout("focus");
       const pane = this.sessions.find((s) => s.rec.id === t.closest<HTMLElement>(".pane")?.dataset.id);
       if (pane && t.closest("[data-action=collapse]")) this.collapse(pane);
+      if (pane && t.closest("[data-action=diff]")) this.showChanges(pane.project);
+      if (pane && t.closest("[data-action=timeline]")) this.openTimeline(pane);
+      if (pane && t.closest("[data-action=terminate]")) this.closeSession(pane);
     });
     $("#dock").addEventListener("click", (e) => {
       const id = (e.target as HTMLElement).closest<HTMLElement>("[data-restore]")?.dataset.restore;
@@ -1102,6 +1475,8 @@ export class App {
           p: () => this.openPalette(),
           f: () => this.selected?.openSearch(),
           d: () => this.showChanges(),
+          i: () => this.openInbox(),
+          e: () => this.openTimeline(),
           "\\": () => this.toggleSplit(),
           w: () => this.closeSession(this.selected),
           g: () => this.setLayout(this.layout === "grid" ? "focus" : "grid"),
@@ -1112,7 +1487,7 @@ export class App {
           j: () => this.nextWaiting(),
           b: () => this.setSidebarHidden(!this.sidebarHidden),
         };
-        const shifted: Record<string, () => unknown> = { r: () => this.renameSelected(), p: () => this.aliases.open() };
+        const shifted: Record<string, () => unknown> = { r: () => this.renameSelected(), p: () => this.aliases.open(), h: () => this.showHome() };
         let action = (e.shiftKey ? shifted : actions)[key];
         if (/^[1-9]$/.test(key)) action = () => this.sessions[Number(key) - 1] && this.select(this.sessions[Number(key) - 1].rec.id);
         if (!action) return;
@@ -1122,7 +1497,7 @@ export class App {
       },
       true,
     );
-    window.addEventListener("focus", () => this.selected?.focus());
+    window.addEventListener("focus", () => !this.homeShown && this.selected?.focus());
   }
 
   private startRename(label: HTMLElement, s: Session) {

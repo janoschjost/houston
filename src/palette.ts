@@ -1,4 +1,5 @@
-import { icon } from "./icons";
+import { icon, light } from "./icons";
+import type { Kind } from "./session";
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -10,6 +11,12 @@ export interface Command {
   hint?: string;
   /** Accent for the label, e.g. a project colour. */
   color?: string;
+  /** Section the command is listed under while the filter is empty. */
+  group?: string;
+  /** Marks a session: its status light is drawn before the label. */
+  session?: { kind: Kind; status: string };
+  /** Text shown under the list while this command is highlighted, e.g. a session's latest terminal lines. */
+  preview?: () => string;
   run(): unknown;
 }
 
@@ -31,6 +38,7 @@ export class CommandPalette {
   private index = 0;
   private filterEl: HTMLInputElement;
   private listEl: HTMLElement;
+  private previewEl: HTMLElement;
 
   /** `closed` runs whenever the palette closes, e.g. to give the terminal its focus back. */
   constructor(private closed: () => void) {
@@ -39,10 +47,12 @@ export class CommandPalette {
     this.el.innerHTML = `<div class="palette" role="dialog" aria-label="Command palette">
       <div class="pal-head"><input class="pal-filter" placeholder="Jump to session, project or action…" spellcheck="false" autocomplete="off" aria-label="Filter commands" /></div>
       <div class="pal-list" role="listbox"></div>
+      <pre class="pal-preview hidden"></pre>
       <div class="pal-foot"><span><kbd>⏎</kbd> run</span><span><kbd>↑↓</kbd> move</span><span><kbd>esc</kbd> close</span></div>
     </div>`;
     this.filterEl = this.el.querySelector(".pal-filter")!;
     this.listEl = this.el.querySelector(".pal-list")!;
+    this.previewEl = this.el.querySelector(".pal-preview")!;
     this.el.addEventListener("mousedown", (e) => e.target === this.el && this.close());
     this.el.addEventListener("keydown", (e) => this.onKey(e));
     this.filterEl.addEventListener("input", () => {
@@ -83,17 +93,26 @@ export class CommandPalette {
           .map((m) => m.c)
       : this.commands;
     this.index = Math.min(this.index, Math.max(0, this.shown.length - 1));
+    let group: string | undefined;
     this.listEl.innerHTML = this.shown.length
       ? this.shown
-          .map(
-            (c, i) => `<div class="pal-row cmd-row${i === this.index ? " sel" : ""}" data-i="${i}" role="option" aria-selected="${i === this.index}">
-              <span class="pal-name"${c.color ? ` style="color: ${c.color}"` : ""}>${escapeHtml(c.label)}</span>
+          .map((c, i) => {
+            // Sections only while browsing; a filtered list is ranked, so headings would be noise.
+            const head = !q && c.group && c.group !== group ? `<div class="pal-group">${escapeHtml(c.group)}</div>` : "";
+            group = c.group;
+            const swatch = c.color ? `<i class="pal-swatch" style="--proj: ${c.color}"></i>` : "";
+            const status = c.session ? `<span class="pal-light" data-status="${c.session.status}">${light(c.session.kind)}</span>` : "";
+            return `${head}<div class="pal-row cmd-row${i === this.index ? " sel" : ""}" data-i="${i}" role="option" aria-selected="${i === this.index}">
+              <span class="pal-name"${c.color ? ` style="color: ${c.color}"` : ""}>${status}${c.session ? "" : swatch}<span class="pal-label">${escapeHtml(c.label)}</span></span>
               <span class="pal-cmd">${escapeHtml(c.detail ?? "")}</span>
               ${c.hint ? `<kbd>${c.hint}</kbd>` : ""}
-            </div>`,
-          )
+            </div>`;
+          })
           .join("")
       : `<div class="pal-empty">Nothing matches</div>`;
+    const preview = this.shown[this.index]?.preview?.() ?? "";
+    this.previewEl.textContent = preview;
+    this.previewEl.classList.toggle("hidden", !preview);
     this.listEl.querySelector(".sel")?.scrollIntoView({ block: "nearest" });
   }
 

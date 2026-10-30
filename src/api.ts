@@ -42,6 +42,24 @@ export interface SessionStats {
   model: string | null;
 }
 
+/** One step of a Claude session read from its transcript: a prompt, a tool call or a reply. */
+export interface ActivityEvent {
+  /** ISO 8601 timestamp. */
+  ts: string;
+  kind: "prompt" | "tool" | "reply";
+  tool: string;
+  summary: string;
+  path: string | null;
+  /** The tool changes `path`. */
+  edit: boolean;
+}
+
+/** A file change a Claude session made. */
+export interface FileEdit {
+  path: string;
+  ts: string;
+}
+
 export interface PathItem {
   insert: string;
   label: string;
@@ -88,6 +106,11 @@ export const api = {
   claudeStatusLine: () => invoke<string>("claude_status_line"),
   claudeLimits: () => invoke<RateLimits | null>("claude_limits"),
   claudeSessionStats: (ids: string[]) => invoke<Record<string, SessionStats>>("claude_session_stats", { ids }),
+  claudeTimeline: (id: string) => invoke<ActivityEvent[]>("claude_timeline", { id }),
+  claudeEdits: (ids: string[]) => invoke<Record<string, FileEdit[]>>("claude_edits", { ids }),
+  remoteStart: () => invoke<{ url: string }>("remote_start"),
+  remoteStop: () => invoke<void>("remote_stop"),
+  remoteUpdate: (snapshot: string) => invoke<void>("remote_update", { snapshot }),
   loadState: <T>() => invoke<T | null>("load_state"),
   saveState: (state: unknown) => invoke<void>("save_state", { state }),
   listAliases: () => invoke<Alias[]>("list_aliases"),

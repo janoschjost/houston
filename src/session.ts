@@ -1,4 +1,4 @@
-import { Terminal, type ITheme } from "@xterm/xterm";
+import { Terminal, type IMarker, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
@@ -63,6 +63,30 @@ export interface SessionContext {
   changed(): void;
   persist(): void;
   isSelected(s: Session): boolean;
+  /** A shell command ended with a non-zero status. */
+  failed(s: Session, command: string, code: number): void;
+  /** The process ended (not killed by Houston). */
+  exited(s: Session, code: number | null): void;
+}
+
+/** A permission dialog Claude Code is showing: what it wants to run, and whether that only reads. */
+export interface PermissionPrompt {
+  tool: string;
+  detail: string;
+  safe: boolean;
+}
+
+/** Tools whose permission dialogs never change anything. */
+const READ_ONLY_TOOL = /^(read|search|list|glob|grep|fetch|web ?search|web ?fetch)/i;
+const READ_ONLY_CMD = /^(ls|cat|head|tail|wc|pwd|echo|grep|rg|tree|which|file|stat|du|df|git (status|diff|log|show|branch|rev-parse|ls-files|remote))\b/;
+/** First row of a permission dialog: what kind of action Claude wants to take. */
+const DIALOG_TITLE = /^(bash|read|edit|write|create|update|delete|fetch|web ?(fetch|search)|search|list|glob|grep|task|notebook|mcp|[\w-]+ command)\b/i;
+/** Shell syntax that can write, chain or run something else. */
+const RISKY_SHELL = /[>`;&]|\$\(|\b(rm|sudo|mv|cp|chmod|kill|curl|wget)\b|-(exec|delete)\b/;
+
+/** Whether a dialog's command is a read-only pipeline of known-harmless programs. */
+function readOnlyCommand(command: string) {
+  return !RISKY_SHELL.test(command) && command.split("|").every((part) => READ_ONLY_CMD.test(part.trim()));
 }
 
 /** Cmd/Option editing shortcuts that xterm would otherwise drop or encode as unusable CSI sequences. */
@@ -168,15 +192,16 @@ const PARTIAL_CSI = /\x1b(\[[\d;:]*)?$/;
 
 /**
  * Houston's mark as a pixel grid for the terminal banner, two pixels per cell: ink ring, planet shaded in
- * the project accent, and the coral satellite at 45° with a halo cutting the ring, as on an idle light.
+ * the project accent, and the coral satellite with a halo cutting the ring, as on an idle light. The satellite
+ * sits at `angle` radians on its orbit (π/4 is the resting position at the upper right).
  */
-function markArt(color: string) {
+function markArt(color: string, angle = Math.PI / 4) {
   const [h, s, l] = toHsl(...(rgb(color).split(";").map(Number) as [number, number, number]));
   const shade = (dl: number) => fromHsl(h, s, Math.min(0.9, Math.max(0.1, l + dl)));
   // A half-block pixel is about 1.24 times taller than wide at 13px with line height 1.15, so x is stretched.
   const ASPECT = 1.24, W = 21, H = 16, cx = 10, cy = 7.5, R = 6.6;
   const ring = rgb(color);
-  const sx = R * Math.SQRT1_2, sy = cy - R * Math.SQRT1_2;
+  const sx = R * Math.cos(angle), sy = cy - R * Math.sin(angle);
   const pixel = (x: number, y: number) => {
     const dx = (x - cx) / ASPECT;
     const d = Math.hypot(dx, y - cy), ds = Math.hypot(dx - sx, y - sy);
@@ -201,6 +226,12 @@ function markArt(color: string) {
   }
   return rows;
 }
+
+/** Seconds the satellite in the banner takes for one orbit. */
+const ORBIT_SECONDS = 8;
+
+/** Rows of the banner's mark. */
+const ART_ROWS = 8;
 
 /** Banner printed into a new terminal before its process starts: the mark plus a launch readout. */
 function banner(rec: SessionRec, project: ProjectRec, home: string) {
@@ -244,6 +275,12 @@ export class Session {
   prompt?: string;
   /** Usage Claude Code reports for this conversation. */
   stats?: SessionStats;
+  /** Uncommitted changes of the project, shown in the pane header when the session has no repo of its own. */
+  projectGit: GitStatus | null = null;
+  /** Files another agent in the project also changed recently, with that agent's name. */
+  overlaps: { path: string; with: string }[] = [];
+  /** Permission dialog on screen right now, if Claude is asking one. */
+  permission: PermissionPrompt | null = null;
 
   private fit = new FitAddon();
   private search = new SearchAddon();
@@ -252,14 +289,18 @@ export class Session {
   private input?: CommandInput;
   private termEl: HTMLElement;
   private stripEl: HTMLElement;
+  private chipsEl: HTMLElement;
+  private ctxEl: HTMLElement;
   private ptyId: string | null = null;
   private spawnCount = 0;
   private opened = false;
   private lastOutput = 0;
   private lastInput = 0;
+  private execAt = 0;
   private workingSince: number | null = null;
   /** Tail of the previous Claude output chunk, held back until its escape sequence completes. */
   private carry = "";
+  private orbitTimer?: number;
 
   constructor(public rec: SessionRec, public project: ProjectRec, private ctx: SessionContext) {
     this.cwd = project.path;
@@ -267,9 +308,11 @@ export class Session {
     this.el.className = `pane kind-${rec.kind}`;
     this.el.dataset.id = rec.id;
     this.el.style.setProperty("--proj", project.color);
-    this.el.innerHTML = `<div class="pane-header">${light(rec.kind, STATUS_LABEL.dormant)}<span class="pane-name"></span><span class="pane-title"></span><button class="pane-min" data-action="collapse" title="Collapse to dock">${icon("collapse")}</button><button class="pane-max" data-action="maximize" title="Focus this session (⌘G)">${icon("focus")}</button></div><div class="pane-search hidden" role="search"><input placeholder="Find" spellcheck="false" autocomplete="off" aria-label="Find in terminal" /><span class="ps-count"></span><button data-find="prev" title="Previous (⇧⏎)">↑</button><button data-find="next" title="Next (⏎)">↓</button><button data-find="close" title="Close (esc)">${icon("close")}</button></div><div class="pane-term"></div><div class="pane-footer"><div class="strip"></div></div>`;
+    this.el.innerHTML = `<div class="pane-header">${light(rec.kind, STATUS_LABEL.dormant)}<span class="pane-name"></span><span class="pane-title"></span><span class="pane-chips"></span>${rec.kind === "claude" ? `<button class="pane-tl" data-action="timeline" title="Mission timeline (⌘E)">${icon("timeline")}</button>` : ""}<button class="pane-min" data-action="collapse" title="Collapse to dock">${icon("collapse")}</button><button class="pane-max" data-action="maximize" title="Focus this session (⌘G)">${icon("focus")}</button><button class="pane-close" data-action="terminate" title="Terminate session (⌘W)">${icon("close")}</button></div><div class="pane-ctx" aria-hidden="true"><i></i></div><div class="pane-search hidden" role="search"><input placeholder="Find" spellcheck="false" autocomplete="off" aria-label="Find in terminal" /><span class="ps-count"></span><button data-find="prev" title="Previous (⇧⏎)">↑</button><button data-find="next" title="Next (⏎)">↓</button><button data-find="close" title="Close (esc)">${icon("close")}</button></div><div class="pane-term"></div><div class="pane-footer"><div class="strip"></div></div>`;
     this.termEl = this.el.querySelector(".pane-term")!;
     this.stripEl = this.el.querySelector(".strip")!;
+    this.chipsEl = this.el.querySelector(".pane-chips")!;
+    this.ctxEl = this.el.querySelector(".pane-ctx")!;
     this.searchEl = this.el.querySelector(".pane-search")!;
     this.searchInput = this.searchEl.querySelector("input")!;
 
@@ -401,7 +444,10 @@ export class Session {
 
   async launch() {
     if (this.ptyId) await api.kill(this.ptyId);
-    if (this.spawnCount === 0) this.term.write(banner(this.rec, this.project, this.ctx.shell.home));
+    if (this.spawnCount === 0) {
+      // Trailing "\r\n\r\n" plus the mark's rows: the marker lands on the first row of the mark and follows it as it scrolls.
+      this.term.write(banner(this.rec, this.project, this.ctx.shell.home), () => this.orbit(this.term.registerMarker(1 - ART_ROWS - 2)));
+    }
     const ptyId = `${this.rec.id}:${++this.spawnCount}`;
     this.ptyId = ptyId;
     this.status = "booting";
@@ -431,6 +477,29 @@ export class Session {
       this.exited(null);
     }
     if (this.ctx.isSelected(this)) this.focus();
+  }
+
+  /** Moves the banner's satellite around the planet for as long as the mark is on the live screen. */
+  private orbit(marker?: IMarker) {
+    if (!marker || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const start = performance.now();
+    let last = "";
+    window.clearInterval(this.orbitTimer);
+    this.orbitTimer = window.setInterval(() => {
+      const buf = this.term.buffer.active;
+      const row = marker.line - buf.baseY;
+      if (marker.isDisposed) return window.clearInterval(this.orbitTimer);
+      // Only the live screen can be addressed; skip while hidden, scrolled out, in a full-screen app or mid-output.
+      if (buf.type !== "normal" || row < 0 || row + ART_ROWS > this.term.rows || !this.termEl.clientHeight) return;
+      if (performance.now() - this.lastOutput < 80) return;
+      const angle = Math.PI / 4 - (2 * Math.PI * ((performance.now() - start) / 1000)) / ORBIT_SECONDS;
+      const art = markArt(this.project.color, angle);
+      const frame = art.join("\n");
+      if (frame === last) return;
+      last = frame;
+      // Save the cursor, repaint each row of the mark in place, restore.
+      this.term.write("\x1b7" + art.map((a, i) => `\x1b[${row + i + 1};1H${a}\x1b[0m`).join("") + "\x1b8");
+    }, 100);
   }
 
   /** Paints Claude Code's orange tones in the project accent; holds back a split escape sequence until the next chunk. */
@@ -468,6 +537,7 @@ export class Session {
     this.term.write(`\r\n\x1b[38;2;86;100;138m── process exited${code === null ? "" : ` [${code}]`} · press ⏎ to relaunch ──\x1b[0m\r\n`);
     this.render();
     this.ctx.changed();
+    this.ctx.exited(this, code);
     if (this.ctx.isSelected(this)) this.term.focus();
   }
 
@@ -496,6 +566,9 @@ export class Session {
         this.render();
       });
     } else if (event === "prompt") {
+      const code = Number(arg);
+      // Quick failures are usually typos; only a command that ran for a while is worth a notification.
+      if (this.runningCommand && code > 0 && code !== 130 && Date.now() - this.execAt > 5000) this.ctx.failed(this, this.runningCommand, code); // 130 is ⌃C
       this.atPrompt = true;
       this.runningCommand = "";
       if (this.startCommand) {
@@ -505,6 +578,7 @@ export class Session {
     } else if (event === "exec") {
       this.atPrompt = false;
       this.runningCommand = arg.split("\n")[0];
+      this.execAt = Date.now();
     }
     this.render();
     this.ctx.changed();
@@ -525,14 +599,18 @@ export class Session {
       this.workingSince ??= now;
     } else if (this.workingSince !== null) {
       const minimum = this.rec.kind === "claude" ? 2000 : 3000;
-      finished = !watched && now - this.workingSince > minimum;
+      const landed = now - this.workingSince > minimum;
+      finished = !watched && landed;
       if (finished) this.needsAttention = true;
+      if (landed) this.land();
       this.workingSince = null;
     }
     if (watched) this.needsAttention = false;
     const booting = this.status === "booting" && (this.rec.kind === "claude" ? this.lastOutput === 0 : !this.atPrompt && this.integrated);
     this.status = booting ? "booting" : busy ? "working" : this.needsAttention ? "attention" : "idle";
     if (finished && this.rec.kind === "claude") this.waitingFor = this.lastWords();
+    if (this.rec.kind === "claude") this.permission = busy || this.status === "booting" ? null : this.readPermission();
+    if (this.permission && this.status === "attention") this.waitingFor = `${this.permission.tool}: ${this.permission.detail}`.slice(0, 160);
     if (this.status !== "attention") this.waitingFor = "";
     this.render();
     return finished;
@@ -546,6 +624,15 @@ export class Session {
     st.querySelector("title")!.textContent = STATUS_LABEL[this.status];
     this.el.querySelector(".pane-name")!.textContent = this.rec.name;
     this.el.querySelector(".pane-title")!.textContent = this.title || shortPath(this.cwd, this.ctx.shell.home);
+    const chips = this.chipsHtml();
+    if (this.chipsEl.innerHTML !== chips) this.chipsEl.innerHTML = chips;
+    const pct = this.stats?.context_percent;
+    this.ctxEl.classList.toggle("hidden", pct == null);
+    if (pct != null) {
+      this.ctxEl.dataset.tier = pct >= 85 ? "high" : pct >= 60 ? "mid" : "low";
+      this.ctxEl.title = `Context ${Math.round(pct)}% used`;
+      (this.ctxEl.firstElementChild as HTMLElement).style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    }
     const showInput = this.inputActive;
     this.term.options.disableStdin = showInput;
     this.input?.el.classList.toggle("hidden", !showInput);
@@ -605,6 +692,92 @@ export class Session {
     return question.slice(0, 160);
   }
 
+  /** The last few non-empty terminal rows, for previews. */
+  snapshot(count = 8) {
+    const buf = this.term.buffer.active;
+    const rows: string[] = [];
+    for (let y = buf.baseY + this.term.rows - 1; y >= 0 && rows.length < count; y--) {
+      const text = (buf.getLine(y)?.translateToString(true) ?? "").trimEnd();
+      if (text.trim()) rows.unshift(text);
+    }
+    return rows.join("\n");
+  }
+
+  /** Branch, uncommitted changes, cost and overlap warnings for the pane header. */
+  private chipsHtml() {
+    const g = this.git ?? this.projectGit;
+    let html = "";
+    if (g) {
+      const dirty = [[g.staged, "+"], [g.modified, "~"], [g.untracked, "?"]].filter(([n]) => n).map(([n, m]) => `${m}${n}`).join(" ");
+      html += `<span class="chip chip-branch" title="Branch ${escapeHtml(g.branch)}">⎇ ${escapeHtml(g.branch)}</span>`;
+      if (dirty) html += `<button class="chip chip-diff" data-action="diff" title="Show uncommitted changes (⌘D)">${dirty}</button>`;
+    }
+    if (this.stats?.cost_usd != null) html += `<span class="chip chip-cost" title="${escapeHtml(this.stats.model ?? "")}">$${this.stats.cost_usd.toFixed(2)}</span>`;
+    if (this.overlaps.length) {
+      const list = this.overlaps.map((o) => `${o.path.split("/").pop()} ↔ ${o.with}`).join("\n");
+      html += `<span class="chip chip-warn" title="${escapeHtml(`Also changed by another agent:\n${list}`)}">${icon("warn")}${this.overlaps.length}</span>`;
+    }
+    return html;
+  }
+
+  /** Landing flourish: a ring ripples out of the pane edge when an agent finishes. */
+  private land() {
+    this.el.classList.remove("landed");
+    void this.el.offsetWidth; // restart the animation
+    this.el.classList.add("landed");
+    const done = (e: AnimationEvent) => {
+      if (e.target !== this.el) return;
+      this.el.classList.remove("landed");
+      this.el.removeEventListener("animationend", done);
+    };
+    this.el.addEventListener("animationend", done);
+  }
+
+  /** The permission dialog on screen, read bottom-up: question row, then the tool and its detail above it. */
+  private readPermission(): PermissionPrompt | null {
+    const buf = this.term.buffer.active;
+    const bottom = buf.baseY + this.term.rows - 1;
+    const row = (y: number) => buf.getLine(y)?.translateToString(true) ?? "";
+    let q = -1;
+    for (let y = bottom; y >= Math.max(0, bottom - 30); y--) {
+      if (/^[\s│┃]*(❯\s*)?1\.\s*Yes\b/.test(row(y))) {
+        // The question sits right above the options.
+        for (let k = y - 1; k >= Math.max(0, y - 3); k--) if (/\b(do you want|would you like|proceed)\b/i.test(row(k))) q = k;
+        break;
+      }
+    }
+    if (q < 0) return null;
+    const lines: string[] = [];
+    for (let y = q - 1; y >= Math.max(0, q - 25); y--) {
+      const raw = row(y);
+      if (/^\s*[╭┌]/.test(raw)) break;
+      const text = cleanRow(raw);
+      if (text) lines.unshift(text);
+    }
+    // The dialog's title is the last row above the question that names a tool; anything earlier is scrollback.
+    const at = lines.map((l) => DIALOG_TITLE.test(l)).lastIndexOf(true);
+    const tool = at >= 0 ? lines[at] : "Permission";
+    const detail = at >= 0 ? (lines[at + 1] ?? "") : (lines.at(-1) ?? "");
+    const safe = READ_ONLY_TOOL.test(tool) || (/^bash/i.test(tool) && readOnlyCommand(detail));
+    return { tool, detail, safe };
+  }
+
+  /** Answers a permission dialog or other prompt with its default "Yes". */
+  approve() {
+    this.typed("\r");
+  }
+
+  /** Dismisses a permission dialog, telling Claude no. */
+  deny() {
+    this.typed("\x1b");
+  }
+
+  /** Sends a message to Claude's prompt as a paste, then submits it. */
+  reply(text: string) {
+    this.typed(`\x1b[200~${text}\x1b[201~`);
+    setTimeout(() => this.typed("\r"), 80);
+  }
+
   openSearch() {
     this.searchEl.classList.remove("hidden");
     this.searchInput.focus();
@@ -653,6 +826,7 @@ export class Session {
   }
 
   dispose() {
+    window.clearInterval(this.orbitTimer);
     if (this.ptyId) api.kill(this.ptyId);
     this.ptyId = null;
     this.term.dispose();
