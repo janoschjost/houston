@@ -1,5 +1,5 @@
 import { ask } from "@tauri-apps/plugin-dialog";
-import { api, type Alias } from "./api";
+import { api, type Alias, type SshHost } from "./api";
 import { icon } from "./icons";
 import { escapeHtml } from "./html";
 
@@ -7,17 +7,25 @@ import { escapeHtml } from "./html";
 export interface AliasPaletteContext {
   /** Opens a shell that runs the alias. */
   connect(alias: Alias): void;
+  /** Opens an SSH session to a host from ~/.ssh/config. */
+  ssh(host: SshHost): void;
   /** Called after an alias is added or renamed so new shells highlight it. */
   defined(name: string): void;
   /** Runs whenever the palette closes, e.g. to give the terminal its focus back. */
   closed(): void;
 }
 
-/** ⌘P overlay listing the aliases in .zshrc: filter, connect, add, edit and delete. */
+/** A row of the launchpad: an alias, or a host from ~/.ssh/config (read-only here). */
+type Item = { alias: Alias; host?: never } | { host: SshHost; alias?: never };
+
+const hostDetail = (h: SshHost) => `ssh ${h.user ? `${h.user}@` : ""}${h.hostname ?? h.name}`;
+
+/** ⌘⇧P overlay listing the aliases in .zshrc and the hosts in ~/.ssh/config: filter, connect, add, edit and delete aliases. */
 export class AliasPalette {
   readonly el: HTMLElement;
   private aliases: Alias[] = [];
-  private shown: Alias[] = [];
+  private hosts: SshHost[] = [];
+  private shown: Item[] = [];
   private index = 0;
   /** Alias being edited; null while adding a new one, undefined while just listing. */
   private editing?: Alias | null;
@@ -31,7 +39,7 @@ export class AliasPalette {
     this.el.className = "palette-backdrop hidden";
     this.el.innerHTML = `<div class="palette" role="dialog" aria-label="Aliases">
       <div class="pal-head">
-        <input class="pal-filter" placeholder="Filter aliases…" spellcheck="false" autocomplete="off" aria-label="Filter aliases" />
+        <input class="pal-filter" placeholder="Filter aliases and SSH hosts…" spellcheck="false" autocomplete="off" aria-label="Filter aliases and SSH hosts" />
         <button class="pal-new" type="button">+ New</button>
       </div>
       <div class="pal-list" role="listbox"></div>
@@ -61,11 +69,11 @@ export class AliasPalette {
     });
     this.listEl.addEventListener("click", (e) => {
       const t = e.target as HTMLElement;
-      const alias = this.shown[Number(t.closest<HTMLElement>("[data-i]")?.dataset.i)];
-      if (!alias) return;
-      if (t.closest("[data-edit]")) this.edit(alias);
-      else if (t.closest("[data-delete]")) this.remove(alias);
-      else this.connect(alias);
+      const item = this.shown[Number(t.closest<HTMLElement>("[data-i]")?.dataset.i)];
+      if (!item) return;
+      if (item.alias && t.closest("[data-edit]")) this.edit(item.alias);
+      else if (item.alias && t.closest("[data-delete]")) this.remove(item.alias);
+      else this.connect(item);
     });
   }
 
@@ -86,35 +94,44 @@ export class AliasPalette {
     this.ctx.closed();
   }
 
-  /** Re-reads .zshrc, so edits made outside Houston show up too. */
+  /** Re-reads .zshrc and ~/.ssh/config, so edits made outside Houston show up too. */
   private async reload() {
-    try {
-      this.aliases = await api.listAliases();
-      this.listEl.dataset.error = "";
-    } catch (e) {
-      this.aliases = [];
-      this.listEl.dataset.error = String(e);
-    }
+    const [aliases, hosts] = await Promise.allSettled([api.listAliases(), api.sshHosts()]);
+    this.aliases = aliases.status === "fulfilled" ? aliases.value : [];
+    this.hosts = hosts.status === "fulfilled" ? hosts.value : [];
+    this.listEl.dataset.error = aliases.status === "rejected" ? String(aliases.reason) : "";
     this.renderList();
   }
 
   private renderList() {
     const q = this.filterEl.value.trim().toLowerCase();
-    this.shown = this.aliases.filter((a) => !q || a.name.toLowerCase().includes(q) || a.command.toLowerCase().includes(q));
+    const match = (...fields: string[]) => !q || fields.some((f) => f.toLowerCase().includes(q));
+    this.shown = [
+      ...this.aliases.filter((a) => match(a.name, a.command)).map((alias) => ({ alias })),
+      ...this.hosts.filter((h) => match(h.name, hostDetail(h))).map((host) => ({ host })),
+    ];
     this.index = Math.min(this.index, Math.max(0, this.shown.length - 1));
     const error = this.listEl.dataset.error;
     this.listEl.innerHTML = this.shown.length
       ? this.shown
-          .map(
-            (a, i) => `<div class="pal-row${i === this.index ? " sel" : ""}" data-i="${i}" role="option" aria-selected="${i === this.index}">
+          .map(({ alias: a, host: h }, i) => {
+            const open = `<div class="pal-row${i === this.index ? " sel" : ""}" data-i="${i}" role="option" aria-selected="${i === this.index}">`;
+            if (h) {
+              return `${open}
+              <span class="pal-name">${escapeHtml(h.name)}</span>
+              <code class="pal-cmd" title="${escapeHtml(hostDetail(h))}">${escapeHtml(hostDetail(h))}</code>
+              <span class="pal-ro" title="Host in ~/.ssh/config: opens an SSH session with remote files">${icon("server")}</span><span></span>
+            </div>`;
+            }
+            return `${open}
               <span class="pal-name">${escapeHtml(a.name)}</span>
               <code class="pal-cmd" title="${escapeHtml(a.command)}">${escapeHtml(a.command)}</code>
               ${a.editable ? `<button data-edit title="Edit (⌘E)">${icon("edit")}</button>` : `<span class="pal-ro" title="Uses shell expansions; edit it in .zshrc">ro</span>`}
               <button data-delete title="Delete (⌘⌫)">${icon("close")}</button>
-            </div>`,
-          )
+            </div>`;
+          })
           .join("")
-      : `<div class="pal-empty">${error ? escapeHtml(error) : q ? "No matching alias" : "No aliases in .zshrc yet"}</div>`;
+      : `<div class="pal-empty">${error ? escapeHtml(error) : q ? "Nothing matches" : "No aliases in .zshrc or hosts in ~/.ssh/config yet"}</div>`;
     this.listEl.querySelector(".sel")?.scrollIntoView({ block: "nearest" });
   }
 
@@ -150,7 +167,7 @@ export class AliasPalette {
     }
     this.ctx.defined(name);
     await this.reload();
-    this.index = Math.max(0, this.shown.findIndex((a) => a.name === name));
+    this.index = Math.max(0, this.shown.findIndex((item) => item.alias?.name === name));
     this.renderList();
     this.list();
   }
@@ -166,9 +183,10 @@ export class AliasPalette {
     this.filterEl.focus();
   }
 
-  private connect(alias: Alias) {
+  private connect(item: Item) {
     this.close();
-    this.ctx.connect(alias);
+    if (item.alias) this.ctx.connect(item.alias);
+    else this.ctx.ssh(item.host);
   }
 
   private onKey(e: KeyboardEvent) {
@@ -182,6 +200,7 @@ export class AliasPalette {
     }
     if (this.editing !== undefined) return;
     const current = this.shown[this.index];
+    const alias = current?.alias;
     const move = (d: number) => {
       e.preventDefault();
       if (!this.shown.length) return;
@@ -193,12 +212,12 @@ export class AliasPalette {
     else if (e.key === "Enter" && current) {
       e.preventDefault();
       this.connect(current);
-    } else if (e.metaKey && e.key.toLowerCase() === "e" && current) {
+    } else if (e.metaKey && e.key.toLowerCase() === "e" && alias) {
       e.preventDefault();
-      this.edit(current);
-    } else if (e.metaKey && e.key === "Backspace" && current) {
+      this.edit(alias);
+    } else if (e.metaKey && e.key === "Backspace" && alias) {
       e.preventDefault();
-      this.remove(current);
+      this.remove(alias);
     } else if (e.metaKey && e.key.toLowerCase() === "p") {
       e.preventDefault();
       this.close();

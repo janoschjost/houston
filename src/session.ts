@@ -3,7 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
-import { api, type GitStatus, type SessionStats, type ShellInfo } from "./api";
+import { api, type GitStatus, type Remote, type SessionStats, type SftpConfig, type ShellInfo } from "./api";
 import type { Completer } from "./completion";
 import { icon, light } from "./icons";
 import { CommandInput } from "./input";
@@ -24,6 +24,8 @@ export interface ProjectRec {
   color: string;
   /** Sessions are hidden in the sidebar behind a one-line summary. */
   collapsed?: boolean;
+  /** Saved SFTP connection; its password, if any, is in the Keychain under the project id. */
+  sftp?: SftpConfig;
 }
 
 /** Project accents, assigned in order to new projects; hues chosen to stay apart from status colours. */
@@ -56,6 +58,8 @@ export interface SessionRec {
   createdAt: number;
   /** Left out of the grid and parked in its dock. */
   collapsed?: boolean;
+  /** A shell session that is an SSH connection to this remote; relaunching reconnects. */
+  remote?: Remote;
 }
 
 export interface SessionContext {
@@ -245,7 +249,7 @@ function banner(rec: SessionRec, project: ProjectRec, home: string) {
     `${title}H O U S T O N   ${dim}MISSION CONTROL`,
     `${dim}${"─".repeat(26)}`,
     `${dim}FLIGHT  ${text}${fit(rec.name)}`,
-    `${dim}CRAFT   ${text}${rec.kind === "claude" ? "CC · claude code" : "SH · shell"}`,
+    `${dim}CRAFT   ${text}${rec.kind === "claude" ? "CC · claude code" : rec.remote ? `SSH · ${fit(rec.remote.host)}` : "SH · shell"}`,
     `${dim}PAD     ${text}${fit(shortPath(project.path, home))}`,
     `${dim}T-0     ${text}${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())} ${dim}· all stations go`,
   ];
@@ -308,7 +312,7 @@ export class Session {
     this.el.className = `pane kind-${rec.kind}`;
     this.el.dataset.id = rec.id;
     this.el.style.setProperty("--proj", project.color);
-    this.el.innerHTML = `<div class="pane-header">${light(rec.kind, STATUS_LABEL.dormant)}<span class="pane-name"></span><span class="pane-title"></span><span class="pane-chips"></span>${rec.kind === "claude" ? `<button class="pane-tl" data-action="timeline" title="Mission timeline (⌘E)">${icon("timeline")}</button>` : ""}<button class="pane-min" data-action="collapse" title="Collapse to dock">${icon("collapse")}</button><button class="pane-max" data-action="maximize" title="Focus this session (⌘G)">${icon("focus")}</button><button class="pane-close" data-action="terminate" title="Terminate session (⌘W)">${icon("close")}</button></div><div class="pane-ctx" aria-hidden="true"><i></i></div><div class="pane-search hidden" role="search"><input placeholder="Find" spellcheck="false" autocomplete="off" aria-label="Find in terminal" /><span class="ps-count"></span><button data-find="prev" title="Previous (⇧⏎)">↑</button><button data-find="next" title="Next (⏎)">↓</button><button data-find="close" title="Close (esc)">${icon("close")}</button></div><div class="pane-term"></div><div class="pane-footer"><div class="strip"></div></div>`;
+    this.el.innerHTML = `<div class="pane-header">${light(rec.kind, STATUS_LABEL.dormant)}<span class="pane-name"></span><span class="pane-title"></span><span class="pane-chips"></span>${rec.kind === "claude" ? `<button class="pane-tl" data-action="timeline" title="Mission timeline (⌘E)">${icon("timeline")}</button>` : ""}${rec.remote ? `<button class="pane-tl" data-action="files" title="Remote files">${icon("project")}</button>` : ""}<button class="pane-min" data-action="collapse" title="Collapse to dock">${icon("collapse")}</button><button class="pane-max" data-action="maximize" title="Focus this session (⌘G)">${icon("focus")}</button><button class="pane-close" data-action="terminate" title="Terminate session (⌘W)">${icon("close")}</button></div><div class="pane-ctx" aria-hidden="true"><i></i></div><div class="pane-search hidden" role="search"><input placeholder="Find" spellcheck="false" autocomplete="off" aria-label="Find in terminal" /><span class="ps-count"></span><button data-find="prev" title="Previous (⇧⏎)">↑</button><button data-find="next" title="Next (⏎)">↓</button><button data-find="close" title="Close (esc)">${icon("close")}</button></div><div class="pane-term"></div><div class="pane-footer"><div class="strip"></div></div>`;
     this.termEl = this.el.querySelector(".pane-term")!;
     this.stripEl = this.el.querySelector(".strip")!;
     this.chipsEl = this.el.querySelector(".pane-chips")!;
@@ -397,8 +401,14 @@ export class Session {
     this.ctx.persist();
   }
 
+  /** The local zsh integration runs here; an SSH session's shell is on the remote host. */
   get integrated() {
-    return this.rec.kind === "shell" && this.ctx.shell.integrated;
+    return this.rec.kind === "shell" && !this.rec.remote && this.ctx.shell.integrated;
+  }
+
+  /** Where the session runs: its remote host, or its working directory. */
+  get place() {
+    return this.rec.remote?.host ?? shortPath(this.cwd, this.ctx.shell.home);
   }
 
   get busy() {
@@ -519,6 +529,11 @@ export class Session {
 
   private async command() {
     const { shell, integrationDir, userZdotdir } = this.ctx.shell;
+    if (this.rec.remote) {
+      const { argv, env } = await api.sshCommand(this.rec.remote);
+      // Through a login shell, like Claude, so a ProxyCommand finds the same PATH as in the user's terminal.
+      return { program: shell, args: ["-l", "-i", "-c", `exec ${argv.map(shellQuote).join(" ")}`], env };
+    }
     if (this.rec.kind === "shell") {
       const env: Record<string, string> = this.integrated ? { ZDOTDIR: integrationDir, HOUSTON_USER_ZDOTDIR: userZdotdir } : {};
       return { program: shell, args: ["-l"], env };
@@ -626,7 +641,7 @@ export class Session {
     st.setAttribute("aria-label", STATUS_LABEL[this.status]);
     st.querySelector("title")!.textContent = STATUS_LABEL[this.status];
     this.el.querySelector(".pane-name")!.textContent = this.rec.name;
-    this.el.querySelector(".pane-title")!.textContent = this.title || shortPath(this.cwd, this.ctx.shell.home);
+    this.el.querySelector(".pane-title")!.textContent = this.title || this.place;
     const chips = this.chipsHtml();
     if (this.chipsEl.innerHTML !== chips) this.chipsEl.innerHTML = chips;
     const pct = this.stats?.context_percent;
@@ -650,9 +665,9 @@ export class Session {
         : `<span class="s-run">⟫ RUNNING</span><code>${escapeHtml(this.runningCommand)}</code><span class="s-dim right">⌃C interrupt</span>`;
     } else {
       const label = STATUS_LABEL[this.status];
-      const id = this.rec.claudeId ? `SID ${this.rec.claudeId.slice(0, 8)}` : this.rec.kind.toUpperCase();
+      const id = this.rec.claudeId ? `SID ${this.rec.claudeId.slice(0, 8)}` : this.rec.remote ? "SSH" : this.rec.kind.toUpperCase();
       const stats = statsLabel(this.stats);
-      html = `<span class="s-${this.status}">${label}</span><span class="s-dim">${escapeHtml(shortPath(this.cwd, this.ctx.shell.home))}</span><span class="s-dim">${id}</span>${stats ? `<span class="s-stats" title="${escapeHtml(this.stats?.model ?? "")}">${stats}</span>` : ""}<span class="s-dim right">${this.launchedAt ? uptime(Date.now() - this.launchedAt) : ""}</span>`;
+      html = `<span class="s-${this.status}">${label}</span><span class="s-dim">${escapeHtml(this.place)}</span><span class="s-dim">${id}</span>${stats ? `<span class="s-stats" title="${escapeHtml(this.stats?.model ?? "")}">${stats}</span>` : ""}<span class="s-dim right">${this.launchedAt ? uptime(Date.now() - this.launchedAt) : ""}</span>`;
     }
     if (this.stripEl.innerHTML !== html) this.stripEl.innerHTML = html;
   }

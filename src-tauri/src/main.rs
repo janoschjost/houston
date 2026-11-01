@@ -6,11 +6,16 @@ mod limits;
 mod pty;
 mod remote;
 mod shell;
+mod ssh;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::Emitter;
 
 fn main() {
+    // ssh runs Houston as its askpass helper to log in with a password saved in the Keychain.
+    if let Ok(account) = std::env::var(ssh::ASKPASS_ENV) {
+        std::process::exit(ssh::askpass(&account));
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -19,6 +24,7 @@ fn main() {
         .manage(pty::Ptys::default())
         .setup(|app| {
             shell::init(app.handle())?;
+            ssh::clear_edits();
             limits::init(app.handle())?;
             // Custom menu: keeps Edit (clipboard) but drops the default ⌘W/⌘N items so the app owns them.
             let h = app.handle();
@@ -85,6 +91,7 @@ fn main() {
             shell::write_project_file,
             shell::launch_detached,
             shell::npm_scripts,
+            shell::installed_apps,
             shell::claude_session_exists,
             shell::load_state,
             shell::save_state,
@@ -99,6 +106,20 @@ fn main() {
             aliases::list_aliases,
             aliases::save_alias,
             aliases::delete_alias,
+            ssh::ssh_hosts,
+            ssh::ssh_command,
+            ssh::sftp_list,
+            ssh::sftp_download,
+            ssh::sftp_upload,
+            ssh::sftp_mkdir,
+            ssh::sftp_remove,
+            ssh::sftp_rename,
+            ssh::sftp_save_password,
+            ssh::sftp_forget_password,
+            ssh::local_list,
+            ssh::sftp_edit,
+            ssh::edit_reopen,
+            ssh::edit_mtime,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Houston");

@@ -5,7 +5,8 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { AliasPalette } from "./aliases";
-import { api, type FileEdit, type GitStatus, type LimitWindow, type RateLimits, type ShellInfo } from "./api";
+import { FilesPanel, remoteLabel } from "./files";
+import { api, type FileEdit, type GitStatus, type LimitWindow, type RateLimits, type Remote, type ShellInfo } from "./api";
 import { Completer } from "./completion";
 import { DiffPanel } from "./diff";
 import { InboxPanel, type InboxItem } from "./inbox";
@@ -31,6 +32,8 @@ interface Launch {
   command?: string;
   /** Opening prompt for a Claude agent. */
   prompt?: string;
+  /** Makes the shell an SSH session to this remote. */
+  remote?: Remote;
 }
 
 interface Persisted {
@@ -80,8 +83,11 @@ function gridColumns(n: number, width: number, height: number) {
 /** How recently two agents must both have changed a file for it to count as an overlap, in milliseconds. */
 const OVERLAP_WINDOW = 30 * 60_000;
 
-/** Editor CLIs offered for "Open in …", in order of preference. */
-const EDITORS = ["cursor", "code", "zed", "subl"];
+/** Editor apps offered for "Open in …", by macOS app name and menu label. */
+const EDITORS = [
+  { app: "PhpStorm", label: "PhpStorm" },
+  { app: "Visual Studio Code", label: "VS Code" },
+];
 
 /** Smallest width or height a resized grid track can be dragged to, in pixels. */
 const MIN_TRACK = 160;
@@ -221,6 +227,7 @@ export class App {
   private overlapSeen = new Set<string>();
   private aliases = new AliasPalette({
     connect: (alias) => this.newSession("shell", undefined, { name: alias.name, command: alias.name }),
+    ssh: (host) => this.newSession("shell", undefined, { name: host.name, remote: { host: host.name } }),
     defined: (name) => this.completer.addCommand(name),
     closed: () => this.selected?.focus(),
   });
@@ -229,6 +236,15 @@ export class App {
   private diff = new DiffPanel(() => this.selected?.focus());
   private menu = new ContextMenu();
   private timeline = new TimelinePanel(() => this.selected?.focus());
+  private files = new FilesPanel({
+    closed: () => this.selected?.focus(),
+    saveConnection: (p, config) => {
+      p.sftp = config;
+      this.renderAll();
+      this.save();
+    },
+    terminal: (p, remote) => this.sshTerminal(p, remote),
+  });
   private inbox = new InboxPanel(
     {
       approve: (id, seen) => this.answer(id, (s) => s.approve(seen)),
@@ -241,11 +257,11 @@ export class App {
 
   constructor(private shell: ShellInfo) {
     this.completer.load(shell);
-    document.body.append(this.aliases.el, this.palette.el, this.brief.el, this.diff.el, this.timeline.el, this.inbox.el, this.menu.el);
+    document.body.append(this.aliases.el, this.palette.el, this.brief.el, this.diff.el, this.timeline.el, this.inbox.el, this.files.el, this.menu.el);
   }
 
   private get overlayOpen() {
-    return this.aliases.isOpen || this.palette.isOpen || this.brief.isOpen || this.diff.isOpen || this.timeline.isOpen || this.inbox.isOpen;
+    return this.aliases.isOpen || this.palette.isOpen || this.brief.isOpen || this.diff.isOpen || this.timeline.isOpen || this.inbox.isOpen || this.files.isOpen;
   }
 
   async start() {
@@ -264,6 +280,10 @@ export class App {
         const project = this.projects.find((p) => p.id === rec.projectId);
         // Sessions from before auto-naming still carry their placeholder name.
         if (rec.kind === "claude" && rec.autoName === undefined && /^agent-\d+$/.test(rec.name)) rec.autoName = true;
+        // SSH sessions saved by an early build named only their host.
+        const legacy = rec as SessionRec & { host?: string };
+        if (legacy.host && !rec.remote) rec.remote = { host: legacy.host };
+        delete legacy.host;
         if (project) this.sessions.push(this.makeSession(rec, project));
       }
       this.orderSessions();
@@ -380,6 +400,7 @@ export class App {
       autoName: kind === "claude" || undefined,
       claudeId: kind === "claude" ? crypto.randomUUID() : undefined,
       createdAt: Date.now(),
+      remote: launch.remote,
     };
     const session = this.makeSession(rec, project);
     session.startCommand = launch.command;
@@ -421,7 +442,21 @@ export class App {
     if (s.busy && !(await ask(`Terminate ${s.rec.name} in ${s.project.name}?${s.rec.kind === "claude" ? "\n\nThe conversation stays saved in Claude Code." : ""}`, { title: "Houston", kind: "warning", okLabel: "Terminate" }))) {
       return;
     }
-    // The confirmation is async; the session may have been closed meanwhile.
+    this.dropSession(s);
+  }
+
+  /** Closes every session of a project after one confirmation; the project itself stays. */
+  private async closeProjectSessions(p: ProjectRec) {
+    const mine = this.sessions.filter((s) => s.project === p);
+    if (!mine.length) return;
+    const count = `${mine.length} session${mine.length === 1 ? "" : "s"}`;
+    const claude = mine.some((s) => s.rec.kind === "claude") ? "\n\nClaude conversations stay saved in Claude Code." : "";
+    if (!(await ask(`Close all ${count} in ${p.name}?${claude}`, { title: "Houston", kind: "warning", okLabel: "Close all" }))) return;
+    for (const s of mine) this.dropSession(s);
+  }
+
+  private dropSession(s: Session) {
+    // Confirmations are async; the session may have been closed meanwhile.
     const index = this.sessions.indexOf(s);
     if (index < 0) return;
     this.sessions.splice(index, 1);
@@ -442,6 +477,8 @@ export class App {
 
   private removeProject(id: string) {
     if (this.sessions.some((s) => s.project.id === id)) return;
+    const secret = this.projects.find((p) => p.id === id)?.sftp?.secret;
+    if (secret) api.sftpForgetPassword(secret).catch((e) => console.error("could not forget the SFTP password", e));
     this.projects = this.projects.filter((p) => p.id !== id);
     this.renderAll();
     this.save();
@@ -711,6 +748,19 @@ export class App {
     this.inbox.open(this.inboxItems(), this.digest());
   }
 
+  /** A shell session logged in over SSH with a connection's settings (and its saved password). */
+  private sshTerminal(p: ProjectRec, { host, port, user, identity, secret }: Remote) {
+    return this.newSession("shell", p.id, { name: host, remote: { host, port, user, identity, secret } });
+  }
+
+  /** The file panel on an SSH session's own host; the project's saved connection when it is the same host. */
+  private openSessionFiles(s: Session) {
+    const remote = s.rec.remote!;
+    const own = s.project.sftp;
+    if (own && own.host === remote.host && own.user === remote.user && own.port === remote.port) this.files.open(s.project);
+    else this.files.openRemote(s.project, remote);
+  }
+
   private openTimeline(s = this.selected) {
     if (!s?.rec.claudeId) return;
     this.timeline.open(s.rec.name, s.project.color, s.project.path, s.rec.claudeId);
@@ -844,7 +894,7 @@ export class App {
             const sub =
               s.status === "attention" && s.waitingFor
                 ? s.waitingFor
-                : s.rec.kind === "claude" ? (!s.rec.autoName && s.title) || "claude code" : s.runningCommand ? `⟫ ${s.runningCommand}` : shortPath(s.cwd, home);
+                : s.rec.kind === "claude" ? (!s.rec.autoName && s.title) || "claude code" : s.runningCommand ? `⟫ ${s.runningCommand}` : s.place;
             return `<div class="sess${s.rec.id === this.selectedId ? " sel" : ""}" data-status="${s.status}" data-select="${s.rec.id}">
               ${light(s.rec.kind, `${s.rec.kind === "claude" ? "Claude" : "Shell"} · ${status}`)}
               <div class="sess-body">
@@ -873,11 +923,12 @@ export class App {
             </div>
             ${waiting && !p.collapsed ? `<span class="proj-wait" title="${waiting} waiting">${waiting}</span>` : ""}
             ${badge ? `<button class="proj-git" data-diff="${p.id}" title="Show uncommitted changes (⌘D)">${badge}</button>` : ""}
+            ${p.sftp ? `<button class="proj-sftp" data-sftp="${p.id}" title="Open SFTP · ${escapeHtml(remoteLabel(p.sftp))}">${icon("server")}</button>` : ""}
             <span class="proj-actions">
               ${mine.length ? `<button data-grid="${p.id}" title="Open in grid">${icon("grid")}</button>` : ""}
               <button data-new="claude" data-pid="${p.id}" title="New Claude agent">${icon("agent")}</button>
               <button data-new="shell" data-pid="${p.id}" title="New shell">${icon("shell")}</button>
-              ${mine.length ? `<button aria-disabled="true" title="Close its sessions first">${icon("close")}</button>` : `<button data-remove="${p.id}" title="Remove project">${icon("close")}</button>`}
+              ${mine.length ? `<button data-close-all="${p.id}" title="Close all sessions">${icon("close")}</button>` : `<button data-remove="${p.id}" title="Remove project">${icon("close")}</button>`}
             </span>
           </div>
           ${p.collapsed ? "" : rows || `<div class="proj-empty">no sessions</div>`}
@@ -983,7 +1034,7 @@ export class App {
     const sub = (s: Session) =>
       s.status === "attention" && s.waitingFor
         ? s.waitingFor
-        : s.rec.kind === "claude" ? (!s.rec.autoName && s.title) || "claude code" : s.runningCommand ? `⟫ ${s.runningCommand}` : shortPath(s.cwd, home);
+        : s.rec.kind === "claude" ? (!s.rec.autoName && s.title) || "claude code" : s.runningCommand ? `⟫ ${s.runningCommand}` : s.place;
     const row = (s: Session, withProject: boolean) => `<button class="home-row" data-status="${s.status}" data-select="${s.rec.id}" style="--proj: ${s.project.color}">
       ${light(s.rec.kind, `${s.rec.kind === "claude" ? "Claude" : "Shell"} · ${STATUS_LABEL[s.status]}`)}
       <span class="home-row-name">${escapeHtml(s.rec.name)}</span>
@@ -1328,13 +1379,18 @@ export class App {
 
   /** Project actions shared by its right-click menu and the command palette; `null` separates groups. */
   private async projectActions(p: ProjectRec): Promise<(MenuItem | null)[]> {
-    const editor = EDITORS.find((c) => this.shell.commands.includes(c));
-    const scripts = await api.npmScripts(p.path).catch(() => [] as string[]);
+    const [scripts, apps] = await Promise.all([
+      api.npmScripts(p.path).catch(() => [] as string[]),
+      api.installedApps(EDITORS.map((e) => e.app)).catch(() => [] as string[]),
+    ]);
+    const editors = EDITORS.filter((e) => apps.includes(e.app));
     const hasSessions = this.sessions.some((s) => s.project === p);
     return [
       ...(hasSessions ? [{ label: "Open in grid", run: () => this.setLayout("grid", p) }] : []),
       { label: "Show changes", hint: "⌘D", run: () => this.showChanges(p) },
-      ...(editor ? [{ label: `Open in ${editor}`, run: () => api.launchDetached(p.path, `${editor} .`) }] : []),
+      { label: p.sftp ? `SFTP · ${remoteLabel(p.sftp)}` : "Set up SFTP…", run: () => this.files.open(p) },
+      ...(p.sftp ? [{ label: "SSH terminal", run: () => this.sshTerminal(p, p.sftp!) }] : []),
+      ...editors.map((e) => ({ label: `Open in ${e.label}`, run: () => api.launchDetached(p.path, `open -a ${shellQuote(e.app)} .`) })),
       { label: "Reveal in Finder", run: () => api.launchDetached(p.path, "open .") },
       { label: "Copy path", run: () => navigator.clipboard.writeText(p.path) },
       { label: "Open pull request", run: () => this.newSession("shell", p.id, { name: "pull request", command: "gh pr view --web || gh pr create --web" }) },
@@ -1350,7 +1406,8 @@ export class App {
       { label: "New shell", run: () => this.newSession("shell", p.id) },
       null,
       ...(await this.projectActions(p)),
-      ...(hasSessions ? [] : [null, { label: "Remove project", run: () => this.removeProject(p.id) }]),
+      null,
+      hasSessions ? { label: "Close all sessions…", run: () => this.closeProjectSessions(p) } : { label: "Remove project", run: () => this.removeProject(p.id) },
     ]);
   }
 
@@ -1388,7 +1445,8 @@ export class App {
       { group: "Actions", label: this.layout === "split" ? "Leave split view" : "Split view", hint: "⌘\\", run: () => this.toggleSplit() },
       { group: "Actions", label: "Next waiting session", hint: "⌘J", run: () => this.nextWaiting() },
       { group: "Actions", label: "Toggle sidebar", hint: "⌘B", run: () => this.setSidebarHidden(!this.sidebarHidden) },
-      { group: "Actions", label: "Aliases…", hint: "⌘⇧P", run: () => this.aliases.open() },
+      { group: "Actions", label: "Aliases & SSH hosts…", hint: "⌘⇧P", run: () => this.aliases.open() },
+      ...(this.selected?.rec.remote ? [{ group: "Actions", label: "Remote files", detail: this.selected.rec.remote.host, run: () => this.openSessionFiles(this.selected!) }] : []),
       { group: "Actions", label: "Send cost digest", detail: this.digest(), run: () => this.sendDigest() },
       { group: "Actions", label: this.remoteUrl ? "Remote glance: turn off" : "Remote glance: turn on…", detail: "read-only status page for your phone", run: () => this.toggleRemote() },
       this.update
@@ -1447,6 +1505,10 @@ export class App {
       const changed = this.projects.find((p) => p.id === data("data-diff"));
       if (changed) return this.showChanges(changed);
       if (data("data-remove")) return this.removeProject(data("data-remove")!);
+      const sftp = this.projects.find((p) => p.id === data("data-sftp"));
+      if (sftp) return this.files.open(sftp);
+      const closing = this.projects.find((p) => p.id === data("data-close-all"));
+      if (closing) return this.closeProjectSessions(closing);
       if (data("data-close")) return this.closeSession(sessionById(data("data-close")));
       // The first click re-renders the sidebar, so a double-click is read from the click count
       // rather than a dblclick event, which may not fire across the replaced row.
@@ -1482,6 +1544,7 @@ export class App {
       if (pane && t.closest("[data-action=collapse]")) this.collapse(pane);
       if (pane && t.closest("[data-action=diff]")) this.showChanges(pane.project);
       if (pane && t.closest("[data-action=timeline]")) this.openTimeline(pane);
+      if (pane?.rec.remote && t.closest("[data-action=files]")) this.openSessionFiles(pane);
       if (pane && t.closest("[data-action=terminate]")) this.closeSession(pane);
     });
     $("#dock").addEventListener("click", (e) => {

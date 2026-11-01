@@ -439,6 +439,13 @@ pub async fn launch_detached(cwd: String, command: String) -> Result<(), String>
     Ok(())
 }
 
+/// Which of the named macOS apps (e.g. "PhpStorm") are installed in /Applications or ~/Applications.
+#[tauri::command]
+pub async fn installed_apps(names: Vec<String>) -> Vec<String> {
+    let dirs = [PathBuf::from("/Applications"), home().join("Applications")];
+    names.into_iter().filter(|n| dirs.iter().any(|d| d.join(format!("{n}.app")).is_dir())).collect()
+}
+
 #[tauri::command]
 pub async fn npm_scripts(cwd: String) -> Vec<String> {
     fs::read_to_string(Path::new(&cwd).join("package.json"))

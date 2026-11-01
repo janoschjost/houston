@@ -1513,6 +1513,7 @@ name = "houston"
 version = "0.1.2"
 dependencies = [
  "portable-pty",
+ "security-framework",
  "serde",
  "serde_json",
  "tauri",

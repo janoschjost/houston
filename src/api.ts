@@ -82,6 +82,54 @@ export interface Alias {
   editable: boolean;
 }
 
+/** A concrete `Host` from ~/.ssh/config. */
+export interface SshHost {
+  name: string;
+  hostname: string | null;
+  user: string | null;
+}
+
+/** Where an SSH session or the file panel connects: a ~/.ssh/config host or an address, with overrides. */
+export interface Remote {
+  host: string;
+  port?: number;
+  user?: string;
+  /** Private key file. */
+  identity?: string;
+  /** Keychain account of the saved password. */
+  secret?: string;
+}
+
+/** A project's saved SFTP connection. */
+export interface SftpConfig extends Remote {
+  /** Remote folder the file panel opens in; the login directory when unset. */
+  path?: string;
+}
+
+export interface LocalEntry {
+  name: string;
+  /** Directory (or a link to one), other symlink, or file. */
+  kind: "d" | "l" | "f";
+  size: number;
+  /** Unix milliseconds. */
+  mtime: number;
+}
+
+export interface RemoteEntry {
+  name: string;
+  /** Directory, symlink or file. */
+  kind: "d" | "l" | "f";
+  size: number;
+  /** As the server lists it, e.g. "Mar 04 12:30". */
+  modified: string;
+}
+
+export interface RemoteListing {
+  /** The directory listed, absolute. */
+  path: string;
+  entries: RemoteEntry[];
+}
+
 export const api = {
   shellInfo: () => invoke<ShellInfo>("shell_info"),
   spawn(req: SpawnRequest, onEvent: (e: PtyEvent) => void) {
@@ -104,6 +152,7 @@ export const api = {
     invoke<void>("write_project_file", { cwd, path, expected, content }),
   launchDetached: (cwd: string, command: string) => invoke<void>("launch_detached", { cwd, command }),
   npmScripts: (cwd: string) => invoke<string[]>("npm_scripts", { cwd }),
+  installedApps: (names: string[]) => invoke<string[]>("installed_apps", { names }),
   claudeSessionExists: (id: string) => invoke<boolean>("claude_session_exists", { id }),
   claudeStatusLine: () => invoke<string>("claude_status_line"),
   claudeLimits: () => invoke<RateLimits | null>("claude_limits"),
@@ -118,4 +167,24 @@ export const api = {
   listAliases: () => invoke<Alias[]>("list_aliases"),
   saveAlias: (original: string | null, name: string, command: string) => invoke<void>("save_alias", { original, name, command }),
   deleteAlias: (name: string) => invoke<void>("delete_alias", { name }),
+  sshHosts: () => invoke<SshHost[]>("ssh_hosts"),
+  /** Argv and environment of an interactive ssh to `remote` that shares its connection with the file panel. */
+  sshCommand: (remote: Remote) => invoke<{ argv: string[]; env: Record<string, string> }>("ssh_command", { remote }),
+  /** An empty `path` lists the login directory. */
+  sftpList: (remote: Remote, path: string) => invoke<RemoteListing>("sftp_list", { remote, path }),
+  sftpDownload: (remote: Remote, path: string, local: string) => invoke<void>("sftp_download", { remote, path, local }),
+  sftpUpload: (remote: Remote, dir: string, locals: string[]) => invoke<void>("sftp_upload", { remote, dir, locals }),
+  sftpMkdir: (remote: Remote, path: string) => invoke<void>("sftp_mkdir", { remote, path }),
+  /** A directory goes with everything in it. */
+  sftpRemove: (remote: Remote, path: string, dir: boolean) => invoke<void>("sftp_remove", { remote, path, dir }),
+  sftpRename: (remote: Remote, from: string, to: string) => invoke<void>("sftp_rename", { remote, from, to }),
+  /** Saves a password in the macOS Keychain under `account`, for `Remote.secret`. */
+  sftpSavePassword: (account: string, password: string) => invoke<void>("sftp_save_password", { account, password }),
+  sftpForgetPassword: (account: string) => invoke<void>("sftp_forget_password", { account }),
+  /** Downloads a remote file to a private temporary copy and opens it in its app; returns the copy's path. */
+  sftpEdit: (remote: Remote, path: string) => invoke<string>("sftp_edit", { remote, path }),
+  editReopen: (local: string) => invoke<void>("edit_reopen", { local }),
+  /** Unix milliseconds; `null` once the copy is gone. */
+  editMtime: (local: string) => invoke<number | null>("edit_mtime", { local }),
+  localList: (path: string) => invoke<LocalEntry[]>("local_list", { path }),
 };

@@ -17,10 +17,15 @@ const PATHS = {
   collapse: "M6 13.5h12",
   chevron: "M7 9.5l5 5 5-5",
   edit: "M4.5 19.5h4l10-10-4-4-10 10zM13 7l4 4",
+  rename: "M4 8h9M4 12h6M4 16h8M17.5 5v14M15.5 5h4M15.5 19h4",
   timeline: "M5 4v16M5 7h6M5 12h10M5 17h7",
   inbox: "M4 13.5l2.5-8h11l2.5 8v5h-16zM4 13.5h5l1 2.5h4l1-2.5h5",
   warn: "M12 4l9 15.5H3zM12 10v4.5M12 17v.3",
   remote: "M8 3.5h8v17H8zM11 17.5h2",
+  server: "M4 4.5h16v6H4zM4 13.5h16v6H4zM7.5 7.5h1M7.5 16.5h1",
+  upload: "M12 16V4.5M7.5 9L12 4.5 16.5 9M4.5 15v4.5h15V15",
+  download: "M12 4.5V16M7.5 11.5L12 16l4.5-4.5M4.5 15v4.5h15V15",
+  up: "M12 19.5V5M6.5 10.5L12 5l5.5 5.5",
   refresh: "M19 12a7 7 0 1 1-2.05-4.95M19.5 4v4h-4",
 } as const;
 
