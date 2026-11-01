@@ -105,6 +105,8 @@ export class CommandInput {
   }
 
   private onKey(e: KeyboardEvent) {
+    // Enter or Escape while an input method is composing belongs to the IME, not the shell.
+    if (e.isComposing) return;
     const popupOpen = this.items.length > 0;
     if (e.ctrlKey && !e.metaKey && !e.altKey) {
       if (this.onControl(e.key.toLowerCase())) e.preventDefault();

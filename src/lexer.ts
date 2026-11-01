@@ -14,7 +14,10 @@ const OPERATORS = ["&&", "||", "|&", ";;", "|", ";", "&", "(", ")"];
 export const COMMAND_PREFIXES = new Set(["sudo", "env", "time", "nohup", "exec", "command", "builtin", "nice", "watch", "xargs"]);
 
 function operatorAt(text: string, i: number): string | undefined {
-  return OPERATORS.find((op) => text.startsWith(op, i));
+  const op = OPERATORS.find((op) => text.startsWith(op, i));
+  // `&` in a redirection (`2>&1`, `<&3`, `&>log`) is part of the word, not a background operator.
+  if (op === "&" && (text[i - 1] === ">" || text[i - 1] === "<" || text[i + 1] === ">")) return undefined;
+  return op;
 }
 
 /** `isCommand` returns undefined while the command list is still loading (no red marking then). */
