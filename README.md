@@ -50,7 +50,7 @@ telemetry and calls you back when an agent lands or needs a decision.
 | **Smart notifications** | Houston only interrupts when an agent is waiting, a long shell command fails or a process crashes. `Send cost digest` in the palette summarises spend. |
 | **Remote glance** | Opt-in from the palette: a read-only status page on your local network (secret link, copied to the clipboard) to check the fleet from a phone. |
 | **Mission patches** | Each project gets its own colour, used in the sidebar, the pane header, the diff panel and the palette. Fold projects you're not working on. |
-| **Updates** | Houston looks for a newer GitHub release on launch, notifies you, and installs it from the palette with a restart. |
+| **Updates** | Houston looks for a newer GitHub release on launch and notifies you. Install it with a restart from **Houston → Check for Updates…** or the palette. |
 | **Project actions** | Right-click a project to open it in your editor or Finder, run an npm script, or open a pull request. |
 
 <p align="center">

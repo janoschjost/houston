@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
@@ -280,6 +281,7 @@ export class App {
     this.notifyAllowed = (await isPermissionGranted()) || (await requestPermission()) === "granted";
     if (saved?.remote) void this.startRemote(false);
     void this.checkForUpdate(false);
+    void listen<string>("menu", (e) => e.payload === "check-updates" && this.checkForUpdate(true));
   }
 
   // ── state ────────────────────────────────────────────────────────────

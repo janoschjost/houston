@@ -7,7 +7,8 @@ mod pty;
 mod remote;
 mod shell;
 
-use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::Emitter;
 
 fn main() {
     tauri::Builder::default()
@@ -30,6 +31,7 @@ fn main() {
                         true,
                         &[
                             &PredefinedMenuItem::about(h, None, None)?,
+                            &MenuItem::with_id(h, "check-updates", "Check for Updates…", true, None::<&str>)?,
                             &PredefinedMenuItem::separator(h)?,
                             &PredefinedMenuItem::hide(h, None)?,
                             &PredefinedMenuItem::hide_others(h, None)?,
@@ -60,6 +62,12 @@ fn main() {
                 ],
             )?;
             app.set_menu(menu)?;
+            // App menu items the frontend handles; it owns the update flow.
+            app.on_menu_event(|app, event| {
+                if event.id() == "check-updates" {
+                    let _ = app.emit("menu", "check-updates");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
