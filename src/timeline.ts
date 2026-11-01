@@ -116,6 +116,7 @@ export class TimelinePanel {
     this.el.focus();
     void this.load(true);
     // New events keep arriving while an agent works.
+    clearInterval(this.timer);
     this.timer = window.setInterval(() => void this.load(), 2000);
   }
 
@@ -135,7 +136,9 @@ export class TimelinePanel {
 
   private render(jumpToEnd: boolean) {
     this.shown = this.rows.filter((r) => !this.off.has(r.cat));
-    const key = `${this.rows.length}|${this.off.size}|${this.shown.length}`;
+    // The backend keeps a capped window of events, so the count alone stops changing on long missions.
+    const last = this.rows.at(-1)?.e;
+    const key = `${this.rows.length}|${last?.ts}|${last?.summary}|${this.off.size}|${this.shown.length}`;
     if (key === this.renderedKey) return;
     this.renderedKey = key;
 
