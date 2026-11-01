@@ -99,7 +99,9 @@ export const api = {
   gitDiff: (cwd: string) => invoke<string>("git_diff", { cwd }),
   gitHeadFile: (cwd: string, path: string) => invoke<string>("git_head_file", { cwd, path }),
   readProjectFile: (cwd: string, path: string) => invoke<string>("read_project_file", { cwd, path }),
-  writeProjectFile: (cwd: string, path: string, content: string) => invoke<void>("write_project_file", { cwd, path, content }),
+  /** Fails without writing when the file no longer holds `expected`. */
+  writeProjectFile: (cwd: string, path: string, expected: string, content: string) =>
+    invoke<void>("write_project_file", { cwd, path, expected, content }),
   launchDetached: (cwd: string, command: string) => invoke<void>("launch_detached", { cwd, command }),
   npmScripts: (cwd: string) => invoke<string[]>("npm_scripts", { cwd }),
   claudeSessionExists: (id: string) => invoke<boolean>("claude_session_exists", { id }),

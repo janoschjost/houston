@@ -349,7 +349,8 @@ pub async fn git_head_file(cwd: String, path: String) -> String {
         return String::new();
     }
     Command::new("git")
-        .args(["-C", &cwd, "--no-optional-locks", "show", &format!("HEAD:{path}")])
+        // "./" makes the path relative to the project folder, which may sit below the repository root.
+        .args(["-C", &cwd, "--no-optional-locks", "show", &format!("HEAD:./{path}")])
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -371,18 +372,24 @@ pub async fn read_project_file(cwd: String, path: String) -> Result<String, Stri
     String::from_utf8(fs::read(&file).map_err(|e| e.to_string())?).map_err(|_| "not a UTF-8 text file".to_string())
 }
 
-/// Overwrites an existing project file with edited text.
+/// Overwrites an existing project file with edited text, unless it no longer holds `expected` (what the editor
+/// last read or wrote): an agent may have changed it meanwhile, and that work must not be overwritten.
 #[tauri::command]
-pub async fn write_project_file(cwd: String, path: String, content: String) -> Result<(), String> {
+pub async fn write_project_file(cwd: String, path: String, expected: String, content: String) -> Result<(), String> {
     let file = project_file(&cwd, &path)?;
     if !file.is_file() {
         return Err("file no longer exists".into());
+    }
+    if fs::read(&file).map_err(|e| e.to_string())? != expected.as_bytes() {
+        return Err("file changed on disk; refresh to reload it".into());
     }
     fs::write(&file, content).map_err(|e| e.to_string())
 }
 
 /// Upper bound on the diff text sent to the UI; a huge generated file must not freeze the panel.
 const DIFF_LIMIT: usize = 4 << 20;
+/// Untracked files diffed one by one (a git process each); an unignored build folder must not spawn thousands.
+const UNTRACKED_LIMIT: usize = 500;
 
 /// Unified diff of the working tree against HEAD, with untracked files shown as additions.
 #[tauri::command]
@@ -395,14 +402,15 @@ pub async fn git_diff(cwd: String) -> String {
             .output()
             .ok()
     };
-    // A repository without commits has no HEAD; its staged and unstaged changes are then the whole diff.
-    let mut diff = git(&["diff", "HEAD", "--no-color", "--no-ext-diff"])
-        .filter(|o| o.status.success())
-        .or_else(|| git(&["diff", "--no-color", "--no-ext-diff"]))
-        .map(|o| o.stdout)
-        .unwrap_or_default();
+    // A repository without commits has no HEAD; diffing against the empty tree then shows staged and unstaged work.
+    // --relative keeps the paths (and the changes) to the project folder, which may sit below the repository root.
+    let base = match git(&["rev-parse", "--verify", "--quiet", "HEAD"]).filter(|o| o.status.success()) {
+        Some(_) => "HEAD".to_string(),
+        None => git(&["hash-object", "-t", "tree", "/dev/null"]).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default(),
+    };
+    let mut diff = git(&["diff", &base, "--relative", "--no-color", "--no-ext-diff"]).map(|o| o.stdout).unwrap_or_default();
     let untracked = git(&["ls-files", "--others", "--exclude-standard", "-z"]).map(|o| o.stdout).unwrap_or_default();
-    for file in untracked.split(|&b| b == 0).filter(|f| !f.is_empty()) {
+    for file in untracked.split(|&b| b == 0).filter(|f| !f.is_empty()).take(UNTRACKED_LIMIT) {
         if diff.len() > DIFF_LIMIT {
             break;
         }
@@ -472,4 +480,62 @@ pub async fn save_state(app: AppHandle, state: serde_json::Value) -> Result<(), 
     let tmp = file.with_extension("json.tmp");
     let body = serde_json::to_vec_pretty(&state).map_err(|e| e.to_string())?;
     fs::write(&tmp, body).and_then(|_| fs::rename(&tmp, &file)).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri::async_runtime::block_on;
+
+    fn repo(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("houston-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        Command::new("git").args(["init", "-q"]).current_dir(&dir).status().unwrap();
+        dir
+    }
+
+    fn commit(dir: &Path) {
+        Command::new("git").args(["add", "."]).current_dir(dir).status().unwrap();
+        Command::new("git").args(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c"]).current_dir(dir).status().unwrap();
+    }
+
+    #[test]
+    fn diff_of_a_subfolder_project_uses_its_own_paths() {
+        let dir = repo("sub");
+        fs::write(dir.join("top.txt"), "a\n").unwrap();
+        fs::write(dir.join("sub/x.txt"), "old\n").unwrap();
+        commit(&dir);
+        fs::write(dir.join("top.txt"), "b\n").unwrap();
+        fs::write(dir.join("sub/x.txt"), "new\n").unwrap();
+        let cwd = dir.join("sub").display().to_string();
+        let diff = block_on(git_diff(cwd.clone()));
+        assert!(diff.contains("+++ b/x.txt") && !diff.contains("top.txt"), "{diff}");
+        assert_eq!(block_on(git_head_file(cwd, "x.txt".into())), "old\n");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn diff_without_commits_shows_staged_files() {
+        let dir = repo("fresh");
+        fs::write(dir.join("staged.txt"), "s\n").unwrap();
+        Command::new("git").args(["add", "staged.txt"]).current_dir(&dir).status().unwrap();
+        fs::write(dir.join("untracked.txt"), "u\n").unwrap();
+        let diff = block_on(git_diff(dir.display().to_string()));
+        assert!(diff.contains("+++ b/staged.txt") && diff.contains("+++ b/untracked.txt"), "{diff}");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn write_refuses_a_file_changed_since_it_was_read() {
+        let dir = repo("write");
+        let cwd = dir.display().to_string();
+        fs::write(dir.join("f.txt"), "agent edit\n").unwrap();
+        assert!(block_on(write_project_file(cwd.clone(), "f.txt".into(), "stale\n".into(), "mine\n".into())).is_err());
+        assert_eq!(fs::read_to_string(dir.join("f.txt")).unwrap(), "agent edit\n");
+        block_on(write_project_file(cwd.clone(), "f.txt".into(), "agent edit\n".into(), "mine\n".into())).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("f.txt")).unwrap(), "mine\n");
+        assert!(block_on(write_project_file(cwd, "../escape.txt".into(), "".into(), "x".into())).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }

@@ -16,6 +16,29 @@ interface FileDiff {
   lines: string[];
 }
 
+/**
+ * A path from a diff header as written on disk. Git C-quotes paths with unusual characters (`"caf\303\251.txt"`,
+ * octal UTF-8 bytes) and ends a path containing spaces with a tab.
+ */
+export function headerPath(raw: string) {
+  if (!raw.startsWith('"')) return raw.replace(/\t$/, "");
+  const bytes: number[] = [];
+  const esc: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 };
+  for (let i = 1; i < raw.length && raw[i] !== '"'; i++) {
+    const c = raw[i];
+    if (c !== "\\") {
+      bytes.push(...new TextEncoder().encode(c));
+    } else if (/[0-7]{3}/.test(raw.slice(i + 1, i + 4))) {
+      bytes.push(parseInt(raw.slice(i + 1, i + 4), 8));
+      i += 3;
+    } else {
+      const n = raw[++i];
+      bytes.push(esc[n] ?? n.charCodeAt(0));
+    }
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
 /** Splits `git diff` output into files. */
 export function parseDiff(text: string): FileDiff[] {
   const files: FileDiff[] = [];
@@ -24,8 +47,12 @@ export function parseDiff(text: string): FileDiff[] {
     const start = lines.findIndex((l) => l.startsWith("@@"));
     const header = start < 0 ? lines : lines.slice(0, start);
     const field = (prefix: string) => header.find((l) => l.startsWith(prefix))?.slice(prefix.length);
-    const strip = (p?: string) => (p && p !== "/dev/null" ? p.replace(/^[ab]\//, "") : undefined);
-    const path = field("rename to ") ?? strip(field("+++ ")) ?? strip(field("--- ")) ?? lines[0].replace(/^a\/(.*) b\/.*$/, "$1");
+    const strip = (p?: string) => {
+      const path = p === undefined ? "/dev/null" : headerPath(p);
+      return path === "/dev/null" ? undefined : path.replace(/^[ab]\//, "");
+    };
+    const renamed = field("rename to ");
+    const path = (renamed !== undefined ? headerPath(renamed) : undefined) ?? strip(field("+++ ")) ?? strip(field("--- ")) ?? lines[0].replace(/^a\/(.*) b\/.*$/, "$1");
     const hunks = lines.slice(header.length).filter((l, i, all) => l || i < all.length - 1);
     files.push({
       path,
@@ -266,7 +293,7 @@ export class DiffPanel {
       if (area.value === saved) return;
       const value = area.value;
       try {
-        await api.writeProjectFile(this.cwd, f.path, value);
+        await api.writeProjectFile(this.cwd, f.path, saved, value);
         saved = value;
         status("saved");
         this.load(true);
