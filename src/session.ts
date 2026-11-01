@@ -734,7 +734,7 @@ export class Session {
   }
 
   /** The permission dialog on screen, read bottom-up: question row, then the tool and its detail above it. */
-  private readPermission(): PermissionPrompt | null {
+  readPermission(): PermissionPrompt | null {
     const buf = this.term.buffer.active;
     const bottom = buf.baseY + this.term.rows - 1;
     const row = (y: number) => buf.getLine(y)?.translateToString(true) ?? "";
@@ -758,13 +758,23 @@ export class Session {
     const at = lines.map((l) => DIALOG_TITLE.test(l)).lastIndexOf(true);
     const tool = at >= 0 ? lines[at] : "Permission";
     const detail = at >= 0 ? (lines[at + 1] ?? "") : (lines.at(-1) ?? "");
-    const safe = READ_ONLY_TOOL.test(tool) || (/^bash/i.test(tool) && readOnlyCommand(detail));
+    // Rows after the command are its description, or the rest of a long or multi-line command; anything
+    // shell-like there means the visible first row is not the whole story.
+    const rest = at >= 0 ? lines.slice(at + 2) : [];
+    const plain = rest.every((l) => !RISKY_SHELL.test(l) && !l.includes("|"));
+    const safe = READ_ONLY_TOOL.test(tool) || (/^bash/i.test(tool) && readOnlyCommand(detail) && plain);
     return { tool, detail, safe };
   }
 
-  /** Answers a permission dialog or other prompt with its default "Yes". */
-  approve() {
+  /**
+   * Answers a permission dialog with its default "Yes", but only while the screen still shows the dialog the
+   * user decided on: a new one may have replaced it since the inbox last refreshed. Returns whether it answered.
+   */
+  approve(seen: PermissionPrompt) {
+    const live = this.readPermission();
+    if (!live || live.tool !== seen.tool || live.detail !== seen.detail || (seen.safe && !live.safe)) return false;
     this.typed("\r");
+    return true;
   }
 
   /** Dismisses a permission dialog, telling Claude no. */

@@ -17,7 +17,8 @@ export interface InboxItem {
 }
 
 export interface InboxActions {
-  approve(id: string): void;
+  /** `seen` is the dialog the user decided on; it is only answered while the screen still shows it. */
+  approve(id: string, seen: PermissionPrompt): void;
   deny(id: string): void;
   reply(id: string, text: string): void;
   open(id: string): void;
@@ -71,7 +72,8 @@ export class InboxPanel {
       const btn = t.closest<HTMLElement>("[data-do]");
       const id = btn?.dataset.id;
       if (!btn || !id) return;
-      if (btn.dataset.do === "approve") this.actions.approve(id);
+      const seen = this.items.find((i) => i.id === id)?.permission;
+      if (btn.dataset.do === "approve") seen && this.actions.approve(id, seen);
       else if (btn.dataset.do === "deny") this.actions.deny(id);
       else if (btn.dataset.do === "open") {
         this.close();
@@ -137,6 +139,6 @@ export class InboxPanel {
   }
 
   private approveSafe() {
-    for (const i of this.items) if (i.permission?.safe) this.actions.approve(i.id);
+    for (const i of this.items) if (i.permission?.safe) this.actions.approve(i.id, i.permission);
   }
 }

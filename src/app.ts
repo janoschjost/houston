@@ -229,7 +229,7 @@ export class App {
   private timeline = new TimelinePanel(() => this.selected?.focus());
   private inbox = new InboxPanel(
     {
-      approve: (id) => this.answer(id, (s) => s.approve()),
+      approve: (id, seen) => this.answer(id, (s) => s.approve(seen)),
       deny: (id) => this.answer(id, (s) => s.deny()),
       reply: (id, text) => this.answer(id, (s) => s.reply(text)),
       open: (id) => this.select(id),
@@ -691,11 +691,11 @@ export class App {
     return `$${total.toFixed(2)} across ${spent.length} agent${spent.length === 1 ? "" : "s"}${w ? ` · 5h limit ${fuelLeft(w)}% left` : ""}`;
   }
 
-  /** Runs an answer on a session from the inbox and refreshes the list. */
-  private answer(id: string, act: (s: Session) => void) {
+  /** Runs an answer on a session from the inbox and refreshes the list; an answer that returns false was not sent. */
+  private answer(id: string, act: (s: Session) => boolean | void): void {
     const s = this.sessions.find((x) => x.rec.id === id);
     if (!s) return;
-    act(s);
+    if (act(s) === false) return this.inbox.update(this.inboxItems(), this.digest());
     s.needsAttention = false;
     s.permission = null;
     s.waitingFor = "";
