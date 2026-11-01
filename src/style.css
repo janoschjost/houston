@@ -1112,8 +1112,7 @@ button { transition: color 140ms var(--ease-ui), background-color 140ms var(--ea
 button:not(:disabled):not([aria-disabled="true"]):active { transform: scale(0.94); }
 button:focus-visible { transition: outline-offset 120ms var(--ease-ui); outline-offset: 2px; }
 
-.sess { transition: background-color 140ms var(--ease-ui), border-color 140ms var(--ease-ui), opacity 200ms var(--ease-ui), transform 160ms var(--ease-ui); }
-.sess:not(.sel):not(.dragging):hover { transform: translateX(2px); }
+.sess { transition: background-color 140ms var(--ease-ui), border-color 140ms var(--ease-ui), opacity 200ms var(--ease-ui); }
 .sess::before { transition: border-color 200ms var(--ease-ui); }
 .sess-actions, .sess-key { transition: opacity 140ms var(--ease-ui); }
 .sess-name { transition: color 200ms var(--ease-ui); }
@@ -1123,8 +1122,8 @@ button:focus-visible { transition: outline-offset 120ms var(--ease-ui); outline-
 .proj-name::before { transition: transform 200ms var(--ease-ui); }
 .proj.active .proj-name::before { transform: scale(1.25); }
 
-.dock-item { transition: border-color 140ms var(--ease-ui), transform 140ms var(--ease-ui), background-color 140ms var(--ease-ui); }
-.dock-item:hover { transform: translateY(-1px); background: var(--raised); }
+.dock-item { transition: border-color 140ms var(--ease-ui), background-color 140ms var(--ease-ui); }
+.dock-item:hover { background: var(--raised); }
 
 .chip-diff, .chip { transition: background-color 140ms var(--ease-ui), border-color 140ms var(--ease-ui), color 140ms var(--ease-ui); }
 
@@ -1136,15 +1135,13 @@ button:focus-visible { transition: outline-offset 120ms var(--ease-ui); outline-
 .palette-backdrop { animation: fade-in 160ms var(--ease-ui); }
 .palette { animation: pop-in 200ms var(--ease-ui); }
 .ctx-menu { transform-origin: top left; animation: pop-in 130ms var(--ease-ui); }
-.ctx-menu button:hover { transform: translateX(2px); }
 .pal-list > *, .palette input, .brief textarea { transition: background-color 120ms var(--ease-ui), border-color 160ms var(--ease-ui), box-shadow 160ms var(--ease-ui); }
 .palette input:focus, .brief textarea:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
 
 .diff-file { transition: background-color 120ms var(--ease-ui); }
 .gutter { transition: background-color 160ms var(--ease-ui); }
 
-#waiting-pill { transition: transform 140ms var(--ease-ui), background-color 140ms var(--ease-ui); }
-#waiting-pill:hover { transform: translateY(-1px); }
+#waiting-pill { transition: background-color 140ms var(--ease-ui); }
 
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes pop-in { from { opacity: 0; transform: translateY(-6px) scale(0.975); } }
