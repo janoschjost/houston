@@ -1,7 +1,7 @@
 import { api, type ActivityEvent } from "./api";
 import { icon } from "./icons";
+import { escapeHtml } from "./html";
 
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** How an event is grouped and filtered. */
 type Cat = "prompt" | "edit" | "run" | "read" | "reply";

@@ -1,7 +1,7 @@
 import { icon, light } from "./icons";
 import type { Kind } from "./session";
+import { escapeHtml } from "./html";
 
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export interface Command {
   label: string;

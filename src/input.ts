@@ -1,4 +1,5 @@
 import type { Completer, Item } from "./completion";
+import { escapeHtml } from "./html";
 
 export interface InputHost {
   completer: Completer;
@@ -11,7 +12,6 @@ const KIND_GLYPH: Record<Item["kind"], string> = {
   cmd: "λ", dir: "▸", file: "·", git: "⎇", sub: "◆", script: "▶", hist: "⟲",
 };
 
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /**
  * Warp-style command editor: a transparent textarea over a highlighted mirror, with

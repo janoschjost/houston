@@ -1,7 +1,7 @@
 import { api } from "./api";
 import { icon } from "./icons";
+import { escapeHtml } from "./html";
 
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Lines rendered per file; the rest of a very large diff is cut off. */
 const MAX_LINES = 4000;

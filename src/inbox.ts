@@ -1,7 +1,7 @@
 import { icon, light } from "./icons";
 import type { Kind, PermissionPrompt } from "./session";
+import { escapeHtml } from "./html";
 
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** One session that needs the user. */
 export interface InboxItem {

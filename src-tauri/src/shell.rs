@@ -443,6 +443,9 @@ pub async fn npm_scripts(cwd: String) -> Vec<String> {
 /// Whether Claude Code has a transcript for this session id (so it can be resumed).
 #[tauri::command]
 pub async fn claude_session_exists(id: String) -> bool {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return false;
+    }
     let file = format!("{id}.jsonl");
     fs::read_dir(home().join(".claude/projects"))
         .map(|dirs| dirs.flatten().any(|d| d.path().join(&file).is_file()))

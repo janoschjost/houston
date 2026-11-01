@@ -12,6 +12,7 @@ import { fillIcons, icon, light, mark } from "./icons";
 import { BriefDialog, CommandPalette, ContextMenu, type Command, type MenuItem } from "./palette";
 import { TimelinePanel } from "./timeline";
 import { STATUS_LABEL, Session, currentProjectColor, nextProjectColor, shellQuote, shortPath, type Kind, type ProjectRec, type SessionRec } from "./session";
+import { escapeHtml } from "./html";
 
 /** Split shows two sessions side by side. */
 type Layout = "focus" | "grid" | "split";
@@ -51,7 +52,6 @@ interface Persisted {
 }
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function countdown(ms: number) {
   const m = Math.ceil(ms / 60_000);
   if (m < 60) return `${m}m`;

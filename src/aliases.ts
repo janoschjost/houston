@@ -1,8 +1,8 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { api, type Alias } from "./api";
 import { icon } from "./icons";
+import { escapeHtml } from "./html";
 
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export interface AliasPaletteContext {
   /** Opens a shell that runs the alias. */

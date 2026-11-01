@@ -7,6 +7,7 @@ import { api, type GitStatus, type SessionStats, type ShellInfo } from "./api";
 import type { Completer } from "./completion";
 import { icon, light } from "./icons";
 import { CommandInput } from "./input";
+import { escapeHtml } from "./html";
 
 export type Kind = "claude" | "shell";
 export type Status = "dormant" | "booting" | "idle" | "working" | "attention" | "exited";
@@ -127,7 +128,6 @@ const CLAUDE_CHROME = /^(\? for shortcuts|esc to|ctrl\+|shift\+tab|⏵|>|❯|\d+
 const cleanRow = (row: string) => row.replace(/^[\s│┃╭╰╮╯─━⎿⏺●✻✳✽·*]+/, "").replace(/[\s│┃╮╯─━]+$/, "");
 
 export const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 export function shortPath(path: string, home: string) {
   return home && path.startsWith(home) ? "~" + path.slice(home.length) : path;
