@@ -798,6 +798,7 @@ export class Session {
   }
 
   private closeSearch() {
+    this.searchInput.blur();
     this.searchEl.classList.add("hidden");
     this.search.clearDecorations();
     this.term.clearSelection();

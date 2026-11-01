@@ -9,6 +9,8 @@ export interface AliasPaletteContext {
   connect(alias: Alias): void;
   /** Called after an alias is added or renamed so new shells highlight it. */
   defined(name: string): void;
+  /** Runs whenever the palette closes, e.g. to give the terminal its focus back. */
+  closed(): void;
 }
 
 /** ⌘P overlay listing the aliases in .zshrc: filter, connect, add, edit and delete. */
@@ -81,6 +83,7 @@ export class AliasPalette {
 
   close() {
     this.el.classList.add("hidden");
+    this.ctx.closed();
   }
 
   /** Re-reads .zshrc, so edits made outside Houston show up too. */

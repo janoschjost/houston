@@ -221,6 +221,7 @@ export class App {
   private aliases = new AliasPalette({
     connect: (alias) => this.newSession("shell", undefined, { name: alias.name, command: alias.name }),
     defined: (name) => this.completer.addCommand(name),
+    closed: () => this.selected?.focus(),
   });
   private palette = new CommandPalette(() => this.selected?.focus());
   private brief = new BriefDialog();
