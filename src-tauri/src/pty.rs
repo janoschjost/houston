@@ -7,6 +7,7 @@ use std::io::{Read, Write};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
 use std::thread;
+use std::time::Duration;
 use tauri::{ipc::Channel, AppHandle, Manager, State};
 
 struct Pty {
@@ -92,6 +93,7 @@ pub fn pty_spawn(
     });
 
     let output = on_event.clone();
+    let (drained, reader_done) = channel::<()>();
     thread::spawn(move || {
         let mut buf = [0u8; 65536];
         let mut pending = Vec::new();
@@ -107,16 +109,19 @@ pub fn pty_spawn(
                 }
             }
         }
+        let _ = drained.send(());
     });
 
+    // Registered before the exit watcher starts, so a process that dies at once cannot leave a stale entry behind.
     let id = req.pty_id.clone();
+    state.0.lock().unwrap().insert(req.pty_id, Pty { master: pair.master, input, killer });
     thread::spawn(move || {
         let code = child.wait().ok().map(|s| s.exit_code());
+        // Let the reader deliver the last output first; a background process still holding the terminal must not stall the exit.
+        let _ = reader_done.recv_timeout(Duration::from_millis(500));
         app.state::<Ptys>().0.lock().unwrap().remove(&id);
         let _ = on_event.send(PtyEvent::Exit { code });
     });
-
-    state.0.lock().unwrap().insert(req.pty_id, Pty { master: pair.master, input, killer });
     Ok(())
 }
 

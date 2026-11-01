@@ -472,7 +472,10 @@ export class Session {
           }
         },
       );
+      // Closed or relaunched while the process was starting: nobody owns it any more.
+      if (this.ptyId !== ptyId) void api.kill(ptyId).catch(() => {});
     } catch (err) {
+      if (this.ptyId !== ptyId) return;
       this.term.write(`\r\n\x1b[31m✖ failed to launch: ${err}\x1b[0m\r\n`);
       this.exited(null);
     }

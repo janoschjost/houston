@@ -418,7 +418,9 @@ export class App {
     if (s.busy && !(await ask(`Terminate ${s.rec.name} in ${s.project.name}?${s.rec.kind === "claude" ? "\n\nThe conversation stays saved in Claude Code." : ""}`, { title: "Houston", kind: "warning", okLabel: "Terminate" }))) {
       return;
     }
+    // The confirmation is async; the session may have been closed meanwhile.
     const index = this.sessions.indexOf(s);
+    if (index < 0) return;
     this.sessions.splice(index, 1);
     let next = this.sessions[Math.min(index, this.sessions.length - 1)]?.rec.id;
     const slot = this.splitIds.indexOf(s.rec.id);
